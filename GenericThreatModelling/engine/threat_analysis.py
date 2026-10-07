@@ -21,6 +21,7 @@ from pathlib import Path
 
 import analyze
 import feedback
+import manuals
 import report
 
 
@@ -90,6 +91,7 @@ def main(argv=None):
     ap.add_argument("--check-only", action="store_true", help="validate setup and static data, then stop")
     ap.add_argument("--feedback", metavar="FILE", help="overrides exported from the report (or taken from another analysis file); merged into those that the output file already holds and kept in the new one")
     ap.add_argument("--images", action="store_true", help="show pictures of the signing devices in the report; they come with a licence that requires an attribution, which the report then shows")
+    ap.add_argument("--manuals", nargs="?", const="", metavar="DIR", help="also write one standalone manual per person (default: next to the setup, *.manual.<person>.html)")
     ap.add_argument("--serve", nargs="?", const=8765, type=int, metavar="PORT", help="after writing, serve the report on 127.0.0.1 (default port 8765) so that its \"save overrides\" button can write the overrides into the analysis file; needs --html")
     args = ap.parse_args(argv)
     if args.serve is not None and args.html is None:
@@ -122,6 +124,9 @@ def main(argv=None):
         print(f"report written to {html}", file=sys.stderr)
     else:
         html = None
+    if args.manuals is not None:
+        paths = manuals.write_all(result, setup, Path(args.manuals) if args.manuals else setup.parent)
+        print(f"{len(paths)} manuals written to {paths[0].parent}" if paths else "no people, no manuals", file=sys.stderr)
     risks = Counter(r["R"] for r in result["rows"])
     print(f"{len(result['rows'])} rows written to {out}", file=sys.stderr)
     print("risk 4..0: " + ", ".join(f"{k}: {risks.get(k, 0)}" for k in (4, 3, 2, 1, 0)), file=sys.stderr)

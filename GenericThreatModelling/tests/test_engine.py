@@ -10,6 +10,7 @@ A test whose expectation depends on the catalog content (which mechanism address
 message when that premise no longer holds, so curating the catalogs does not turn the tests red.
 """
 import copy
+import html
 import json
 import subprocess
 import sys
@@ -26,6 +27,7 @@ import access       # noqa: E402
 import feedback     # noqa: E402
 import graph        # noqa: E402
 import loader       # noqa: E402
+import manuals      # noqa: E402
 import ontology     # noqa: E402
 import outcomes as outc  # noqa: E402
 import rating       # noqa: E402
@@ -1970,9 +1972,56 @@ class Scenarios(unittest.TestCase):
             self.assertEqual(errors, [], path.name)
 
 
+class Manuals(Base):
+    """A manual holds only what its person can reach or needs for their rights, and no attacker-only step."""
+    @classmethod
+    def setUpClass(cls):
+        cls.pages = {p: manuals.render(BASE["S"], BASE["ev"], BASE["cat"], BASE["result"], p) for p in ("alice", "carol", "dave")}
+
+    def test_scope_is_what_the_person_reaches_or_needs(self):
+        carol = self.pages["carol"]
+        self.assertIn("Hiding place C", carol)
+        self.assertIn("Hiding place A", carol)         # her co-signer Alice's part of w-spread
+        for eid in ("loc-safe", "w-single", "w-multi", "b2a", "d1"):
+            self.assertNotIn(html.escape(self.S.name(eid)), carol, eid)
+        self.assertIn("Safe in the home", self.pages["alice"])
+
+    def test_attacker_only_actions_never_appear(self):
+        names = [a["name"] for a in self.cat.actions.values() if a.get("for") == "attacker"]
+        self.assertTrue(names)
+        for page in self.pages.values():
+            for n in names:
+                self.assertNotIn(html.escape(n), page)
+
+    def test_delayed_right_gives_a_takeover_section_with_the_wait(self):
+        dave = self.pages["dave"]
+        self.assertIn(self.t["manual"]["setup_heir"], dave)
+        self.assertIn("52000 blocks", dave)
+        self.assertIn(self.t["manual"]["setup_owner"], self.pages["alice"])
+
+    def test_maintenance_lists_only_practices_that_touch_the_person(self):
+        carol = self.pages["carol"]
+        for p in self.S.data.get("practices", []):
+            m = self.cat.mechanisms[p["mechanism"]]
+            targets = [e for e in self.S.ids_of(m["target"]) if not p.get("scope") or e in p["scope"]]
+            if not any(e in manuals.scope(self.S, self.ev, "carol") for e in targets):
+                self.assertNotIn(html.escape(m["name"]) + " <small>", carol)
+
+    @property
+    def t(self):
+        return loader.read_json(self.cat.data_dir / "Texts.json")
+
+
 class CommandLine(unittest.TestCase):
     def run_cli(self, *args):
         return subprocess.run([sys.executable, str(CLI), *map(str, args)], capture_output=True, text=True)
+
+    def test_manuals_are_written_per_person(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = self.run_cli(SETUP, "-o", Path(d) / "a.json", "--manuals", d)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(sorted(f.name for f in Path(d).glob("*.manual.*.html")),
+                             [f"TestSetup.manual.{p}.html" for p in ("alice", "bob", "carol", "dave")])
 
     def test_check_only(self):
         p = self.run_cli(SETUP, "--check-only")
