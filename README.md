@@ -49,7 +49,7 @@ Four views of the same analysis:
   - `engine/`: the analysis engine and the report generator.
   - `tests/`: unit tests, a fixture setup and 15 scenarios from a hot wallet on a phone to nested bags at a trustee.
 - `Lookups/`: catalogs of signing devices, metal backups and location kinds, and device pictures.
-- `SpecificThreatAnalysis/`: a dummy setup and its analysis and report.
+- `SpecificThreatAnalysis/`: a dummy setup. Analysis files and reports are generated and not kept in git; the overrides you give in a report are stored in the analysis file, so keep that file with your own setup.
 
 ## Tests
 

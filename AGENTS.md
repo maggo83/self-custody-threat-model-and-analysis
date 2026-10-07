@@ -16,7 +16,7 @@ python3 GenericThreatModelling/engine/threat_analysis.py SpecificThreatAnalysis/
 cd GenericThreatModelling/tests/scenarios && python3 generate.py
 ```
 
-Regenerate the reports after any change to `engine/report.template.html`, the catalogs or the engine, and run the tests first.
+Analysis files and reports (`*.analysis.json`, `*.report.html`, `tests/scenarios/index.html`) are generated and ignored by git. Regenerate them to look at a change in `engine/report.template.html`, the catalogs or the engine; run the tests first.
 Python 3.12, standard library plus `jsonschema` (Draft 2020-12), tests with `unittest` only.
 
 ## Principle: one source per fact
