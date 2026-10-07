@@ -1,0 +1,142 @@
+{
+  "status": "draft, to be curated; texts of the report. {name} are placeholders filled by the report generator",
+  "classes": {
+    "Person": ["Person", "People"],
+    "Location": ["Location", "Locations"],
+    "TamperEvidentBag": ["Tamper-evident bag", "Tamper-evident bags"],
+    "BagStrip": ["Bag strip", "Bag strips"],
+    "SigningDevice": ["Signing device", "Signing devices"],
+    "ComputingDevice": ["Computing device", "Computing devices"],
+    "Backup": ["Backup", "Backups"],
+    "Seed": ["Seed", "Seeds"],
+    "Passphrase": ["Passphrase", "Passphrases"],
+    "PinPassword": ["PIN or password", "PINs and passwords"],
+    "Descriptor": ["Descriptor", "Descriptors"],
+    "Wallet": ["Wallet", "Wallets"],
+    "Coordinator": ["Coordinator", "Coordinators"],
+    "Plan": ["Plan", "Plan"]
+  },
+  "risk_labels": ["negligible", "low", "medium", "high", "critical"],
+  "outcomes": {
+    "none": "No effect",
+    "inconvenience": "Inconvenience",
+    "latent_margin": "Latent fault, margin left",
+    "latent_no_margin": "Latent fault, no margin left",
+    "lockout_temporary": "Temporary lock-out",
+    "privacy_loss": "Loss of privacy",
+    "owner_access_lost": "An owner loses all access to the main funds",
+    "aux_loss": "Loss of auxiliary funds",
+    "main_loss": "Loss of main funds"
+  },
+  "exploit": {
+    "immediate": "an attacker can act at once",
+    "at_use": "an attacker can act when the funds are used",
+    "at_recovery": "an attacker can act when the setup is recovered",
+    "after_delay": "an attacker can act once the delay of that policy has passed",
+    "none": ""
+  },
+  "effects": {
+    "lost": "Lost or destroyed",
+    "disclosed": "Disclosed to an attacker",
+    "controlled": "Controlled by an attacker",
+    "tampered": "Tampered with",
+    "blocked": "Unavailable for now",
+    "touched": "Accessed",
+    "secret_known": "Secrets known to an attacker",
+    "secret_lost": "Secrets lost",
+    "secret_blocked": "Secrets unavailable for now",
+    "privacy": "Privacy is affected",
+    "plan_impaired": "The plan cannot be used for recovery"
+  },
+  "wallet_flags": {
+    "tamper": "tampered with by an attacker",
+    "tamper_latent": "set up wrongly, not noticed yet",
+    "blocked": "blocked",
+    "soft": "needs a repair or replacement",
+    "privacy": "privacy affected"
+  },
+  "likelihood": {
+    "threat": "Base {base}: estimate for this threat.",
+    "category_default": "Base {base}: no estimate for this threat yet, default of its category. To be reviewed.",
+    "modifier": "{delta}: {reason}",
+    "ask": "Depends on your situation: {ask}",
+    "result": "Likelihood {value}: {band} over {years} years."
+  },
+  "vulnerability": {
+    "none": "No measure of the setup addresses this threat.",
+    "worst": "Rated for the worst outcome, on wallet {wallet}.",
+    "effect": {
+      "eliminates": "removes the threat",
+      "reduces": "makes it harder or milder",
+      "detects": "makes it visible"
+    },
+    "mechanism": "{name}: {effect} (on {entities}), protection {strength}.",
+    "mechanism_note": "{name}: {effect} (on {entities}), but {note}.",
+    "note": {
+      "no_response": "it does not count because nothing answers a detection in time",
+      "too_slow": "it does not count because it detects too late for this outcome",
+      "quorum_gap": "it does not count because signers that do not have it can sign alone"
+    },
+    "result": "Prevention {prevention}, detection {detection}: vulnerability {value} = 4 - protection ({band}).",
+    "weakened": "it counts less, because {reason}",
+    "barrier": "keeps the funds from ever reaching the delay",
+    "travel": ", least journey {minutes} minutes",
+    "travel_alone": ", cannot be done by that person alone"
+  },
+  "severity": {
+    "none": "Nothing is affected.",
+    "worst": "{wallet}: {detail}.",
+    "others": "Also: {outcomes}.",
+    "result": "Severity {value}: {label}."
+  },
+  "risk": {
+    "result": "Likelihood {L} + vulnerability {V} - 4 gives the residual likelihood {RL}; with severity {S} the risk matrix gives {R} ({label})."
+  },
+  "chain": {
+    "threat": "{threat} hits {class} {entity}. {description}",
+    "peers": "The same cause also hits: {peers}.",
+    "effect": "{label}: {entities}.",
+    "flag": "Wallet {wallet} is {flags}.",
+    "outcome": "{wallet}: {label}, {detail}{exploit}.",
+    "open": "Open question: {text}"
+  },
+  "needs_input": {
+    "detection_without_response": "A detecting measure exists, but no recovery action answers it: say whether someone would react.",
+    "likelihood_default": "The likelihood is a category default: review it."
+  },
+  "schedule": {
+    "every_months": "every {n} months",
+    "every_fraction_of_delay": "before {n:.0%} of the delay has passed",
+    "trigger": {
+      "at_setup": "at setup",
+      "before_each_use": "before each use",
+      "after_each_use": "after each use",
+      "on_change": "when something changes",
+      "on_event": "when it happens",
+      "continuous": "continuously"
+    }
+  },
+  "measures": {
+    "by_use": "In place without a practice: it happens anyway because of how these are used."
+  },
+  "procedure": {
+    "all_of": "all of",
+    "any_of": "one of",
+    "k_of_n": "enough of"
+  },
+  "rights": {
+    "line": "{wallet}: {who} {when}",
+    "alone": "alone",
+    "with": "together with {others}",
+    "now": "at once",
+    "later": "after {blocks} blocks (about {days} days)"
+  },
+  "access": {
+    "lost": "{person} loses every way to spend {wallet}.",
+    "delayed": "{person} can spend {wallet} only later than intended, or after a repair."
+  },
+  "not_applicable": {
+    "applies_when": "The threat does not apply to this kind of entity.",
+    "predicate": "The setup does not meet the condition of the threat ({name})."
+  }
+}

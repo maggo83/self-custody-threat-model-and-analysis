@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "Mechanisms.schema.json",
+  "title": "Prevention and detection mechanisms",
+  "description": "Principles are generic mechanisms (keep things apart, keep redundancy, verify independently, check regularly, monitor, maintain periodically); specific mechanisms refine them. Mechanisms reduce the likelihood or the impact of threats (prevention) or make an incident visible (detection). A structural mechanism is a property of the setup itself and is recognised in the plan with `present_when` (conditions or a named predicate on the target entity). A procedural mechanism is something people do; it is made of recovery actions (`procedure`) and repeated on a `schedule`. Which threats a mechanism helps against is stored here (`addresses`), not in the threat catalogue.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mechanisms"],
+  "properties": {
+    "mechanisms": { "type": "array", "items": { "$ref": "#/$defs/mechanism" } }
+  },
+  "$defs": {
+    "schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "every_months": { "type": "integer", "minimum": 1 },
+        "every_fraction_of_delay": { "description": "Repeat after this fraction of the longest timelock of the target wallet.", "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "trigger": { "description": "continuous: automated, not performed by a person.", "enum": ["at_setup", "before_each_use", "after_each_use", "on_change", "on_event", "continuous"] }
+      }
+    },
+    "addressed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["threat", "effect"],
+      "properties": {
+        "threat": { "$ref": "ThreatModelCommon.schema.json#/$defs/threatId" },
+        "effect": {
+          "description": "eliminates: the threat can no longer occur or no longer has an impact. reduces: it becomes harder, rarer or milder. detects: the incident becomes visible (detection mechanisms). Detection says when the signal can appear, `schedule` says how often it is looked at.",
+          "enum": ["eliminates", "reduces", "detects"]
+        },
+        "when": { "description": "Optional restriction to lifecycle phases of the threat.", "type": "array", "items": { "$ref": "ThreatModelCommon.schema.json#/$defs/phase" } }
+      }
+    },
+    "mechanism": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "description", "form"],
+      "properties": {
+        "id": { "$ref": "ThreatModelCommon.schema.json#/$defs/mechanismId" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "origin": { "$ref": "ThreatModelCommon.schema.json#/$defs/origin" },
+        "kind": { "enum": ["prevention", "detection"] },
+        "form": { "description": "principle: an abstract, generic mechanism that is only described and refined by others; it has no kind, target or addresses. structural: a property of the setup. procedural: something people do.", "enum": ["principle", "structural", "procedural"] },
+        "refines": { "description": "The principle this mechanism is a specific form of. Threats are linked only on the refining mechanism, never on the principle.", "$ref": "ThreatModelCommon.schema.json#/$defs/mechanismId" },
+        "target": {
+          "description": "Class of the entity the mechanism protects or is attached to.",
+          "$ref": "ThreatModelCommon.schema.json#/$defs/entityClass"
+        },
+        "covers": {
+          "description": "Which threat instances the mechanism acts on. self: threats on the target entity. contents: threats on entities stored in or at the target (a bag or location covers what it holds). dependents: threats whose impact reaches a wallet that depends on the target. colocated_secrets: threats on entities that share a location with the secrets of the target wallet (a tripwire). own: only threats on the very entity the mechanism is attached to (self also counts people and the plan everywhere). quorum: the mechanism acts when a signing device takes part in signing, so it protects a wallet only if every group of signers that can spend contains a device that has it (worst case: the group without it is used).",
+          "enum": ["self", "own", "contents", "dependents", "colocated_secrets", "quorum"],
+          "default": "self"
+        },
+        "strength_from": { "description": "Structural prevention whose protection is read from a measure of the setup instead of from the effect: quorum_travel_minutes = the least journey a person needs to bring together a group of signers that can spend at once (Ratings protection.travel_minutes).", "enum": ["quorum_travel_minutes"] },
+        "quorum_group": { "description": "Only with covers: quorum. Mechanisms of one group do the same check in different ways; a signer group is covered if it has a device that has any of them.", "type": "string" },
+        "weakened_when": {
+          "description": "The protection is lowered by `delta` when the attacker of a threat instance knows something (known: linking_descriptor = a descriptor of another wallet that contains a key of the target wallet, or the plan). Used for a tripwire that is recognised.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["known", "delta", "reason"],
+            "properties": {
+              "known": { "enum": ["linking_descriptor"] },
+              "delta": { "type": "integer", "maximum": -1 },
+              "reason": { "type": "string" }
+            }
+          }
+        },
+        "present_when": { "description": "Structural only: conditions on the target entity that tell the mechanism is in place.", "$ref": "ThreatModelCommon.schema.json#/$defs/conditions" },
+        "applies_when": { "description": "Procedural only: conditions on the target entity under which the procedure is possible or meaningful (e.g. the device supports it).", "$ref": "ThreatModelCommon.schema.json#/$defs/conditions" },
+        "implicit_when": { "description": "Procedural only: conditions on the target entity under which the procedure happens anyway, because of how the entity is used (a device in regular use is powered on and noticed when it fails); no practice is needed then.", "$ref": "ThreatModelCommon.schema.json#/$defs/conditions" },
+        "predicate": { "description": "Structural: tells that the mechanism is in place. Procedural: tells that the procedure applies.", "$ref": "ThreatModelCommon.schema.json#/$defs/predicate" },
+        "procedure": { "description": "Procedural only: recovery actions that are carried out, in order.", "type": "array", "minItems": 1, "items": { "$ref": "ThreatModelCommon.schema.json#/$defs/actionId" } },
+        "schedule": { "description": "Procedural only.", "$ref": "#/$defs/schedule" },
+        "signal": { "description": "Detection only: what is observed when the threat has struck.", "type": "string" },
+        "addresses": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/addressed" } },
+        "caveat": { "type": "string" }
+      },
+      "allOf": [
+        { "if": { "properties": { "form": { "const": "structural" } } }, "then": { "anyOf": [{ "required": ["present_when"] }, { "required": ["predicate"] }], "not": { "anyOf": [{ "required": ["procedure"] }, { "required": ["schedule"] }, { "required": ["applies_when"] }, { "required": ["implicit_when"] }] } } },
+        { "if": { "properties": { "form": { "const": "procedural" } } }, "then": { "required": ["procedure", "schedule"], "not": { "required": ["present_when"] } } },
+        { "if": { "properties": { "kind": { "const": "detection" } }, "required": ["kind"] }, "then": { "required": ["signal"] } },
+        { "if": { "properties": { "form": { "const": "principle" } } }, "then": { "not": { "anyOf": [{ "required": ["kind"] }, { "required": ["target"] }, { "required": ["addresses"] }, { "required": ["schedule"] }, { "required": ["present_when"] }, { "required": ["applies_when"] }, { "required": ["implicit_when"] }, { "required": ["predicate"] }, { "required": ["refines"] }] } }, "else": { "required": ["kind", "target", "addresses"] } }
+      ]
+    }
+  }
+}

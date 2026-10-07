@@ -1,0 +1,19 @@
+{
+  "schema_version": "0.9",
+  "name": "02 Single-sig with a passphrase",
+  "comment": "Like 01, but the seed is used with a passphrase that Alice only knows by heart. A burglar who finds the backup still has no access; forgetting the passphrase or Alice's death now loses the funds.",
+  "people": [{ "id": "alice", "name": "Alice", "roles": ["owner"], "may_spend": [{}] }],
+  "locations": [
+    { "id": "loc-home", "name": "Home", "kind": "home", "access": ["alice"] }
+  ],
+  "devices": [{ "id": "d1", "name": "Device", "use": "regular", "vendor": "BitBox", "model": "BitBox02", "stored_in": { "location": "loc-home" } }],
+  "seeds": [{ "id": "s1", "name": "Seed", "devices": ["d1"] }],
+  "passphrases": [{ "id": "pp1", "name": "Passphrase" }],
+  "backups": [
+    { "id": "b1", "name": "Seed, paper", "medium": "paper", "stored_in": { "location": "loc-home" }, "items": [{ "subject": { "seed": "s1" }, "format": "words" }] },
+    { "id": "b-head", "name": "Passphrase, memorised", "medium": "memory", "stored_in": { "person": "alice" }, "items": [{ "subject": { "passphrase": "pp1" }, "format": "text" }] }
+  ],
+  "computing_devices": [{ "id": "laptop", "name": "Laptop", "kind": "laptop", "use": "regular", "stored_in": { "location": "loc-home" } }],
+  "coordinators": [{ "id": "coord", "name": "Coordinator", "product": "Sparrow", "runs_on": "laptop" }],
+  "wallets": [{ "id": "w1", "name": "Wallet", "coordinator": "coord", "spending_policies": [{ "signers": [{ "seed": "s1", "passphrase": "pp1" }], "threshold": 1 }] }]
+}

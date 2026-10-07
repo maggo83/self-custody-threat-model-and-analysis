@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "Threats.schema.json",
+  "title": "Generic threat catalogue",
+  "description": "A flat list of threats. Each threat targets one class of the setup ontology; the analysis instantiates it for every matching entity of a plan. A threat only describes the cause and its immediate effect on items; outcomes such as theft or lock-out are computed by checking the spending policies against the affected items. Mitigations are not listed here; mechanisms and recovery actions point to threats.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["category_likelihood", "threats"],
+  "properties": {
+    "likelihood_status": { "type": "string" },
+    "category_likelihood": { "description": "Base likelihood band (0 to 4, see Ratings.json) of a threat without a `likelihood` of its own, per category. The loader checks that every category has one.", "type": "object", "propertyNames": { "$ref": "ThreatModelCommon.schema.json#/$defs/category" }, "additionalProperties": { "$ref": "#/$defs/band" } },
+    "threats": { "type": "array", "items": { "$ref": "#/$defs/threat" } }
+  },
+  "$defs": {
+    "band": { "type": "integer", "minimum": 0, "maximum": 4 },
+    "threat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "description", "target", "category", "source", "phases", "impacts"],
+      "properties": {
+        "id": { "$ref": "ThreatModelCommon.schema.json#/$defs/threatId" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "origin": { "$ref": "ThreatModelCommon.schema.json#/$defs/origin" },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["class"],
+          "properties": {
+            "class": { "$ref": "ThreatModelCommon.schema.json#/$defs/entityClass" },
+            "cardinality": { "enum": ["one", "set"], "default": "one", "description": "`set`: the threat involves several entities of the class at once (e.g. people colluding)." },
+            "min_size": { "type": "integer", "minimum": 2 },
+            "subclasses": { "description": "For an abstract class such as Secret: the concrete classes the threat applies to.", "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "ThreatModelCommon.schema.json#/$defs/entityClass" } }
+          }
+        },
+        "category": { "$ref": "ThreatModelCommon.schema.json#/$defs/category" },
+        "source": {
+          "description": "Who or what causes it. `insider` is a person of the plan; `outsider` is anybody else.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "ThreatModelCommon.schema.json#/$defs/source" }
+        },
+        "phases": {
+          "description": "Lifecycle activities in which the threat can strike.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "ThreatModelCommon.schema.json#/$defs/phase" }
+        },
+        "applies_when": { "$ref": "ThreatModelCommon.schema.json#/$defs/conditions" },
+        "predicate": { "$ref": "ThreatModelCommon.schema.json#/$defs/predicate" },
+        "likelihood": {
+          "description": "Base likelihood band (0 to 4, see Ratings.json) before the setup's measures. Without it the category default applies and the line is flagged for review. `ask` marks a value that depends on facts the owner must supply; the answer replaces the value.",
+          "oneOf": [
+            { "$ref": "#/$defs/band" },
+            { "type": "object", "additionalProperties": false, "required": ["value"], "properties": { "value": { "$ref": "#/$defs/band" }, "ask": { "type": "string" }, "reason": { "type": "string" } } }
+          ]
+        },
+        "likelihood_modifiers": {
+          "description": "Adjustments of the base likelihood for the entities the threat is instantiated on. A modifier that holds for several threats is written in each of them.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["when", "delta", "reason"],
+            "properties": {
+              "when": { "$ref": "ThreatModelCommon.schema.json#/$defs/conditions" },
+              "delta": { "type": "integer", "minimum": -4, "maximum": 4 },
+              "reason": { "type": "string" }
+            }
+          }
+        },
+        "target_acts": { "description": "The target persons are themselves the attackers (they act against the setup). What they may do by their access rights is not a failure.", "type": "boolean" },
+        "impacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/impact" }
+        },
+        "technology": { "description": "Protocol or technology the weakness lies in (protocol-level threats); matched against technology attributes of the plan.", "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+        "comment": { "type": "string" }
+      }
+    },
+    "impact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["on", "kind"],
+      "properties": {
+        "on": { "$ref": "ThreatModelCommon.schema.json#/$defs/impactOn" },
+        "kind": { "$ref": "ThreatModelCommon.schema.json#/$defs/impactKind" },
+        "unless": {
+          "description": "Affected items that satisfy all of these conditions are not affected (e.g. a fireproof product in a fire).",
+          "$ref": "ThreatModelCommon.schema.json#/$defs/conditions"
+        }
+      }
+    }
+  }
+}

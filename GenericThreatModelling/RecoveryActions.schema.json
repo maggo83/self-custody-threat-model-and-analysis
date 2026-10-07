@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "RecoveryActions.schema.json",
+  "title": "Recovery, response and maintenance actions",
+  "description": "Actions form a tree: atomic actions are leaves with concrete requirements; composite actions combine other actions with all_of, any_of or k_of_n. Actions are parameterised by entities of the setup ontology; arguments and expressions are written as `$name` or `$name.attribute.path` and are resolved against the plan (plus the derived helpers: `copies` of a secret, i.e. its (backup, item) pairs; `seeds` of a device; `wallets` of a seed, passphrase or device; `devices` of a descriptor; `enclosing_bags` of a backup or device, outermost first; `bags`, `devices` and `backups` stored in or at a location (recursively); `items` of a backup; `people`, `locations` and `wallets` of a plan; `is_cloud` and `is_physical` of a location; `all_signers` of a wallet over all policies; `immediate_policy` of a wallet, i.e. the policy without delay; `default_descriptor` of a wallet, truthy for a default definition). Which actions help against which threat is stored here (`responds_to`), not in the threat catalogue.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["actions"],
+  "properties": {
+    "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } }
+  },
+  "$defs": {
+    "expr": { "type": "string", "pattern": "^\\$[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)*$" },
+    "param": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "class"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+        "class": { "description": "Ontology class (including the nested parts Signer, SpendingPolicy, BackupItem), or Number; the loader checks it.", "type": "string" }
+      }
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "description": "reach: physical access to a Location, bag, device or backup, including the containers it sits in (decided by Location.access). have: a tool or capability from the vocabulary in `what`. wait: a delay in blocks. intact: the item still exists and is unmodified.",
+          "enum": ["reach", "have", "wait", "intact"]
+        },
+        "target": { "$ref": "#/$defs/expr" },
+        "what": { "enum": ["coordinator", "signing_device", "computer_offline", "computer_online", "power", "psbt_transport", "internet", "decryption_tool", "backup_tool", "new_device_source", "tamper_evident_bag"] },
+        "blocks": { "$ref": "#/$defs/expr" },
+        "note": { "type": "string" }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "action": { "$ref": "ThreatModelCommon.schema.json#/$defs/actionId" },
+        "args": { "type": "object", "additionalProperties": { "$ref": "#/$defs/expr" } },
+        "foreach": {
+          "description": "Repeat the step for every element of the collection and bind it to `as`.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["over", "as"],
+          "properties": {
+            "over": { "$ref": "#/$defs/expr" },
+            "as": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+          }
+        },
+        "when": { "description": "Only if the expression is present or true in the plan.", "$ref": "#/$defs/expr" }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "description", "purpose", "type"],
+      "properties": {
+        "id": { "$ref": "ThreatModelCommon.schema.json#/$defs/actionId" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "origin": { "$ref": "ThreatModelCommon.schema.json#/$defs/origin" },
+        "purpose": {
+          "description": "access: obtain the ability to use funds or information. restore: rebuild a lost element. response: react to an incident. maintenance: recurring upkeep. setup: create something new.",
+          "enum": ["access", "restore", "response", "maintenance", "setup"]
+        },
+        "type": { "enum": ["atomic", "composite"] },
+        "params": { "type": "array", "items": { "$ref": "#/$defs/param" } },
+        "requires": { "description": "Atomic actions only.", "type": "array", "items": { "$ref": "#/$defs/requirement" } },
+        "combinator": { "description": "Composite actions only. all_of: every step. any_of: one alternative suffices. k_of_n: at least k steps (usually over a foreach).", "enum": ["all_of", "any_of", "k_of_n"] },
+        "k": { "oneOf": [{ "type": "integer", "minimum": 1 }, { "$ref": "#/$defs/expr" }] },
+        "steps": { "description": "Composite actions only.", "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/step" } },
+        "applies_when": { "$ref": "ThreatModelCommon.schema.json#/$defs/conditions" },
+        "responds_to": { "type": "array", "uniqueItems": true, "items": { "$ref": "ThreatModelCommon.schema.json#/$defs/threatId" } },
+        "caveat": { "type": "string" }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "atomic" } } }, "then": { "required": ["requires"], "not": { "anyOf": [{ "required": ["steps"] }, { "required": ["combinator"] }] } } },
+        { "if": { "properties": { "type": { "const": "composite" } } }, "then": { "required": ["combinator", "steps"], "not": { "required": ["requires"] } } },
+        { "if": { "properties": { "combinator": { "const": "k_of_n" } }, "required": ["combinator"] }, "then": { "required": ["k"] } }
+      ]
+    }
+  }
+}

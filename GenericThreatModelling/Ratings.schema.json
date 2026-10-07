@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "Ratings.schema.json",
+  "title": "Rating scales and tables of the threat analysis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scales", "outcomes", "protection", "residual_likelihood", "risk_matrix"],
+  "properties": {
+    "status": { "type": "string" },
+    "scales": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["likelihood", "vulnerability", "severity"],
+      "properties": {
+        "likelihood": { "$ref": "#/$defs/scale" },
+        "vulnerability": { "$ref": "#/$defs/scale" },
+        "severity": { "$ref": "#/$defs/scale" }
+      }
+    },
+    "outcomes": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z_]+$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "description"],
+        "properties": { "severity": { "$ref": "#/$defs/band" }, "description": { "type": "string" } }
+      }
+    },
+    "protection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prevention", "detection", "bonus_prevention_and_detection", "max"],
+      "properties": {
+        "description": { "type": "string" },
+        "prevention": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["eliminates", "reduces"],
+          "properties": { "eliminates": { "$ref": "#/$defs/band" }, "reduces": { "$ref": "#/$defs/band" } }
+        },
+        "detection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requires_response", "self_responding_triggers", "by_trigger", "by_interval_months", "fast_enough"],
+          "properties": {
+            "requires_response": { "type": "boolean" },
+            "self_responding_triggers": { "description": "Checks done before the act; their finding is the response (do not proceed).", "type": "array", "items": { "type": "string" } },
+            "by_trigger": { "type": "object", "additionalProperties": { "$ref": "#/$defs/band" } },
+            "setup_check": { "description": "Detection strength of a check at setup for threats whose phases are all listed.", "type": "object", "additionalProperties": false, "required": ["phases", "value"], "properties": { "description": { "type": "string" }, "phases": { "type": "array", "items": { "type": "string" } }, "value": { "$ref": "#/$defs/band" } } },
+            "by_interval_months": {
+              "type": "array",
+              "items": { "type": "object", "additionalProperties": false, "required": ["max", "value"], "properties": { "max": { "type": "integer" }, "value": { "$ref": "#/$defs/band" } } }
+            },
+            "fast_enough": { "description": "Triggers of a detection that act in time, per way the outcome is exploited; any = every trigger and interval counts.", "type": "object", "additionalProperties": { "oneOf": [{ "const": "any" }, { "type": "array", "items": { "type": "string" } }] } }
+          }
+        },
+        "after_delay": { "type": "object", "additionalProperties": false, "required": ["eliminates", "reduces"], "properties": { "description": { "type": "string" }, "eliminates": { "$ref": "#/$defs/band" }, "reduces": { "$ref": "#/$defs/band" } } },
+        "travel_minutes": { "description": "Protection of a mechanism that makes a person travel before they can spend: the value of the highest row whose at_least minutes the least journey reaches.", "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["at_least", "value"], "properties": { "at_least": { "type": "integer", "minimum": 1 }, "value": { "$ref": "#/$defs/band" } } } },
+        "bonus_prevention_and_detection": { "type": "integer", "minimum": 0 },
+        "max": { "$ref": "#/$defs/band" }
+      }
+    },
+    "residual_likelihood": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["formula", "min", "max"],
+      "properties": { "formula": { "const": "likelihood + vulnerability - 4" }, "min": { "$ref": "#/$defs/band" }, "max": { "$ref": "#/$defs/band" } }
+    },
+    "risk_matrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["values"],
+      "properties": {
+        "description": { "type": "string" },
+        "values": { "type": "array", "minItems": 5, "maxItems": 5, "items": { "type": "array", "minItems": 5, "maxItems": 5, "items": { "$ref": "#/$defs/band" } } }
+      }
+    }
+  },
+  "$defs": {
+    "band": { "type": "integer", "minimum": 0, "maximum": 4 },
+    "scale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bands"],
+      "properties": {
+        "description": { "type": "string" },
+        "horizon_years": { "type": "integer", "minimum": 1 },
+        "bands": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value"],
+            "properties": { "value": { "$ref": "#/$defs/band" }, "probability": { "type": "string" }, "label": { "type": "string" } }
+          }
+        }
+      }
+    }
+  }
+}

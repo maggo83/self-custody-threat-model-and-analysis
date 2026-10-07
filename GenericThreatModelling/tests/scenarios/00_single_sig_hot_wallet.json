@@ -1,0 +1,12 @@
+{
+  "schema_version": "0.9",
+  "name": "00 Single-sig hot wallet on a phone",
+  "comment": "The simplest setup of all: the seed lives on Alice's smartphone, and the wallet app (the coordinator) runs on the same phone, so whoever controls the phone controls keys and transactions. The phone is carried by Alice. There is no backup at all. Compare with 01, where the seed sits on a hardware wallet and the coordinator on a laptop.",
+  "people": [{ "id": "alice", "name": "Alice", "roles": ["owner"], "may_spend": [{}] }],
+  "locations": [],
+  "computing_devices": [{ "id": "phone", "name": "Phone", "kind": "mobile", "product": "Android", "use": "regular", "stored_in": { "person": "alice" } }],
+  "seeds": [{ "id": "s1", "name": "Seed", "devices": ["phone"] }],
+  "backups": [],
+  "coordinators": [{ "id": "coord", "name": "Wallet app", "product": "Blockstream Green", "runs_on": "phone" }],
+  "wallets": [{ "id": "w1", "name": "Wallet", "coordinator": "coord", "spending_policies": [{ "signers": [{ "seed": "s1" }], "threshold": 1 }] }]
+}

@@ -1,0 +1,135 @@
+{
+  "schema_version": "0.9",
+  "name": "Dummy setup",
+  "comment": "Converted from DummySetup.csv. Where the CSV is silent, the values are assumptions and marked as such in comments.",
+  "people": [
+    { "id": "husband", "name": "Husband", "roles": ["owner"], "may_spend": [{}] },
+    { "id": "wife", "name": "Wife", "roles": ["heir"], "may_spend": [{ "after_blocks": 26280 }], "comment": "Not an owner: she inherits only once the husband is dead, and does not know where the deposit box is. Delay of the self-recovery policy." },
+    { "id": "kid", "name": "Kid", "roles": ["heir"], "may_spend": [{ "with": ["uncle-jim"], "after_blocks": 65535 }], "comment": "Too young to act on its own." },
+    { "id": "uncle-jim", "name": "Uncle Jim", "roles": ["trustee"], "may_spend": [{ "after_blocks": 65535 }], "comment": "Trusted relative. If both owners die, he helps the kid to access the funds once it is of age. Delay of the safety-net policy." }
+  ],
+  "locations": [
+    { "id": "loc-home", "name": "Home", "kind": "home", "access": ["husband", "wife"] },
+    { "id": "loc-home-desk", "name": "Desk", "kind": "home", "part_of": "loc-home", "access": ["husband", "wife"], "comment": "In plain view: the main device." },
+    { "id": "loc-home-hidden", "name": "Hidden spot at home", "kind": "hidden_at_home", "part_of": "loc-home", "access": ["husband", "wife"], "comment": "Attic or similar: the backups of the main seed, the descriptor copies and the strips." },
+    { "id": "loc-depositbox", "name": "Deposit box", "kind": "safe_deposit_box", "provider": "Bank", "access": ["husband"], "comment": "CSV: 30-60 min travel. Only the husband has access; the wife does not know where the box is." },
+    { "id": "loc-buried", "name": "Buried or walled in", "kind": "buried", "access": ["husband", "wife"], "comment": "CSV: far away, buried or walled in, hard to retrieve." },
+    { "id": "loc-relative", "name": "Uncle Jim's home", "kind": "relative_home", "access": ["husband", "wife", "uncle-jim"], "comment": "CSV: far away, with a trusted relative. Uncle Jim has no access to the owners' home." },
+    { "id": "loc-cloud", "name": "Cloud", "kind": "cloud", "provider": "Cloud provider", "access": ["husband", "wife"] }
+  ],
+  "strips": [
+    { "id": "strip-safetynet", "name": "Strip of the SafetyNet bag", "serial": "EXAMPLE-0001", "stored_in": { "location": "loc-home-hidden" }, "comment": "Kept at home." },
+    { "id": "strip-jim", "name": "Strip of the outer bag", "serial": "EXAMPLE-0002", "stored_in": { "location": "loc-home-hidden" }, "comment": "Kept at home." }
+  ],
+  "bags": [
+    { "id": "bag-jim", "name": "Outer bag at Uncle Jim's", "strip": "strip-jim", "stored_in": { "location": "loc-relative" }, "comment": "Holds the SafetyNet bag, the SafetyNet device and the plan." },
+    { "id": "bag-safetynet", "name": "SafetyNet bag", "strip": "strip-safetynet", "stored_in": { "bag": "bag-jim" }, "comment": "Holds the SafetyNet seed backups, the PIN and the descriptor copies." }
+  ],
+  "devices": [
+    { "id": "dev-main1", "name": "Main1 device", "use": "regular", "vendor": "BitBox", "model": "BitBox02 Nova", "stores_descriptors": ["desc-multisig"], "stored_in": { "location": "loc-home-desk" } },
+    { "id": "dev-main2-jade", "name": "Main2 Jade Plus", "vendor": "Blockstream", "model": "Jade Plus (Plastic)", "stores_descriptors": ["desc-multisig"], "stored_in": { "location": "loc-depositbox" }, "comment": "Replaces the Coldcard Q, which is no longer trusted." },
+    { "id": "dev-recoverself", "name": "RecoverSelf device", "vendor": "Ledger", "model": "Nano X", "stores_descriptors": ["desc-multisig"], "stored_in": { "location": "loc-buried" }, "comment": "CSV: Ledger Nano X or nothing, optionally without PIN." },
+    { "id": "dev-safetynet", "name": "SafetyNet device", "vendor": "BitBox", "model": "BitBox02", "pin": "pin-safetynet", "stores_descriptors": ["desc-multisig"], "stored_in": { "bag": "bag-jim" } }
+  ],
+  "seeds": [
+    { "id": "seed-main1", "name": "Main1", "devices": ["dev-main1"] },
+    { "id": "seed-main2", "name": "Main2", "devices": ["dev-main2-jade"] },
+    { "id": "seed-recoverself", "name": "RecoverSelf", "devices": ["dev-recoverself"] },
+    { "id": "seed-safetynet", "name": "SafetyNet", "devices": ["dev-safetynet"] }
+  ],
+  "pins": [
+    { "id": "pin-safetynet", "name": "SafetyNet device PIN" }
+  ],
+  "descriptors": [
+    { "id": "desc-multisig", "name": "Multisig descriptor", "wallet": "wallet-multisig" }
+  ],
+  "computing_devices": [{ "id": "laptop-husband", "name": "Husband's laptop", "kind": "laptop", "use": "regular", "stored_in": { "location": "loc-home-desk" }, "comment": "Assumed: stands on the desk." }],
+  "coordinators": [{ "id": "coord-sparrow", "name": "Sparrow", "product": "Sparrow", "runs_on": "laptop-husband", "comment": "Assumed: one watch-only coordinator for all wallets." }],
+  "wallets": [
+    {
+      "id": "wallet-main1",
+      "coordinator": "coord-sparrow",
+      "name": "Main1 tripwire (single-sig)",
+      "comment": "Plain single-sig with the Main1 key and only a small amount: used for on/off-ramp interaction, satoshi tests and message signing with exchanges, and as a tripwire.",
+      "spending_policies": [{ "signers": [{ "seed": "seed-main1" }], "threshold": 1 }],
+      "tripwire": { "enabled": true }
+    },
+    {
+      "id": "wallet-multisig",
+      "coordinator": "coord-sparrow",
+      "name": "Multisig",
+      "comment": "Husband and wife sign together at once. After a delay a recovery seed joins; after the maximum delay SafetyNet alone can spend. The intermediate delay is assumed (about six months).",
+      "spending_policies": [
+        { "signers": [{ "seed": "seed-main1" }, { "seed": "seed-main2" }], "threshold": 2 },
+        { "signers": [{ "seed": "seed-main1" }, { "seed": "seed-main2" }, { "seed": "seed-recoverself" }], "threshold": 2, "delay_blocks": 26280 },
+        { "signers": [{ "seed": "seed-safetynet" }], "threshold": 1, "delay_blocks": 65535 }
+      ],
+      "descriptor": "desc-multisig",
+      "definition": "custom"
+    },
+    {
+      "id": "wallet-tripwire-recoverself",
+      "coordinator": "coord-sparrow",
+      "name": "RecoverSelf tripwire",
+      "spending_policies": [{ "signers": [{ "seed": "seed-recoverself" }], "threshold": 1 }],
+      "tripwire": { "enabled": true }
+    },
+    {
+      "id": "wallet-tripwire-safetynet",
+      "coordinator": "coord-sparrow",
+      "name": "SafetyNet tripwire",
+      "spending_policies": [{ "signers": [{ "seed": "seed-safetynet" }], "threshold": 1 }],
+      "tripwire": { "enabled": true }
+    }
+  ],
+  "backups": [
+    { "id": "bk-main1-seed-paper", "name": "Main1 seed, paper", "medium": "paper", "stored_in": { "location": "loc-home-hidden" }, "items": [{ "subject": { "seed": "seed-main1" }, "format": "words" }], "comment": "Backup is checked regularly, so paper is enough." },
+    { "id": "bk-main1-seed-usb", "name": "Main1 seed, USB drive", "medium": "usb_drive", "stored_in": { "location": "loc-home-hidden" }, "items": [{ "subject": { "seed": "seed-main1" }, "format": "words" }] },
+    { "id": "bk-desc-home-print", "name": "Multisig descriptor, printout", "medium": "paper", "stored_in": { "location": "loc-home-hidden" }, "items": [{ "subject": { "descriptor": "desc-multisig" }, "format": "text" }] },
+    { "id": "bk-desc-home-usb", "name": "Multisig descriptor, USB drive", "medium": "usb_drive", "stored_in": { "location": "loc-home-hidden" }, "items": [{ "subject": { "descriptor": "desc-multisig" }, "format": "file" }] },
+
+    { "id": "bk-main2-seed-paper", "name": "Main2 seed, paper", "medium": "paper", "stored_in": { "location": "loc-depositbox" }, "items": [{ "subject": { "seed": "seed-main2" }, "format": "words" }] },
+    { "id": "bk-main2-seed-sd", "name": "Main2 seed, SD card", "medium": "sd_card", "stored_in": { "location": "loc-depositbox" }, "items": [{ "subject": { "seed": "seed-main2" }, "format": "words" }] },
+
+    { "id": "bk-recoverself-seed-paper", "name": "RecoverSelf seed, paper", "medium": "paper", "stored_in": { "location": "loc-buried" }, "items": [{ "subject": { "seed": "seed-recoverself" }, "format": "words" }] },
+    { "id": "bk-recoverself-seed-metal", "name": "RecoverSelf seed, metal", "medium": "metal", "stored_in": { "location": "loc-buried" }, "items": [{ "subject": { "seed": "seed-recoverself" }, "format": "words" }], "comment": "Cannot be checked after burying, hence metal. Deliberately no descriptor here, so a finder does not learn that a multisig exists." },
+
+    { "id": "bk-safetynet-seed-paper", "name": "SafetyNet seed, paper", "medium": "paper", "stored_in": { "bag": "bag-safetynet" }, "items": [{ "subject": { "seed": "seed-safetynet" }, "format": "words" }] },
+    { "id": "bk-safetynet-seed-metal", "name": "SafetyNet seed, metal", "medium": "metal", "stored_in": { "bag": "bag-safetynet" }, "items": [{ "subject": { "seed": "seed-safetynet" }, "format": "words" }], "comment": "Checked rarely, hence metal." },
+    { "id": "bk-safetynet-pin", "name": "SafetyNet PIN, paper", "medium": "paper", "stored_in": { "bag": "bag-safetynet" }, "items": [{ "subject": { "pin": "pin-safetynet" }, "format": "text" }] },
+    { "id": "bk-safetynet-desc-print", "name": "Multisig descriptor, printout in bag", "medium": "paper", "stored_in": { "bag": "bag-safetynet" }, "items": [{ "subject": { "descriptor": "desc-multisig" }, "format": "text" }] },
+    { "id": "bk-safetynet-desc-usb", "name": "Multisig descriptor, USB drive in bag", "medium": "usb_drive", "stored_in": { "bag": "bag-safetynet" }, "items": [{ "subject": { "descriptor": "desc-multisig" }, "format": "file" }] },
+
+    { "id": "bk-plan-print", "name": "Inheritance plan, printout", "medium": "paper", "stored_in": { "bag": "bag-jim" }, "items": [{ "subject": { "plan": true }, "format": "printed" }] },
+    { "id": "bk-plan-usb", "name": "Inheritance plan, USB drive", "medium": "usb_drive", "stored_in": { "bag": "bag-jim" }, "items": [{ "subject": { "plan": true }, "format": "pdf" }] },
+
+    { "id": "bk-desc-cloud", "name": "Multisig descriptor, cloud", "medium": "cloud_storage", "stored_in": { "location": "loc-cloud" }, "items": [{ "subject": { "descriptor": "desc-multisig" }, "format": "file", "encrypted_with": [{ "seed": "seed-main1" }, { "seed": "seed-main2" }, { "seed": "seed-recoverself" }, { "seed": "seed-safetynet" }] }], "comment": "Encrypted so that any seed of the wallet can decrypt it." }
+  ],
+  "travel_times": [
+    { "from": "loc-home", "to": "loc-depositbox", "minutes": 30 },
+    { "from": "loc-home", "to": "loc-buried", "minutes": 180 },
+    { "from": "loc-home", "to": "loc-relative", "minutes": 180 },
+    { "from": "loc-depositbox", "to": "loc-buried", "minutes": 180 },
+    { "from": "loc-depositbox", "to": "loc-relative", "minutes": 180 },
+    { "from": "loc-buried", "to": "loc-relative", "minutes": 120 }
+  ],
+  "practices": [
+    { "id": "p-bag-seal", "mechanism": "M-D-BAG-SEAL-CHECK", "comment": "Assumed for the example." },
+    { "id": "p-bag-serial", "mechanism": "M-D-BAG-SERIAL-CHECK", "comment": "Assumed for the example." },
+    { "id": "p-device-check", "mechanism": "M-D-DEVICE-CHECK", "scope": ["dev-main1", "dev-main2-jade", "dev-safetynet"], "comment": "Assumed: the buried device is not checked." },
+    { "id": "p-backup-verify", "mechanism": "M-D-BACKUP-VERIFY", "scope": ["bk-main1-seed-paper", "bk-main1-seed-usb", "bk-main2-seed-paper", "bk-main2-seed-sd", "bk-desc-home-print", "bk-desc-home-usb"], "comment": "CSV: backups are checked regularly; buried and relative backups rarely or never." },
+    { "id": "p-setup-test", "mechanism": "M-P-SETUP-TEST-ALL-SIGNERS", "scope": ["wallet-multisig"], "comment": "Assumed: at setup a test receive and several test sends, so that every signer took part once." },
+    { "id": "p-test-tx", "mechanism": "M-D-TEST-TX", "scope": ["wallet-main1", "wallet-multisig"], "comment": "Assumed for the example." },
+    { "id": "p-tripwire", "mechanism": "M-D-TRIPWIRE", "scope": ["wallet-tripwire-recoverself", "wallet-tripwire-safetynet", "wallet-main1"] },
+    { "id": "p-timelock", "mechanism": "M-P-REFRESH-TIMELOCK", "scope": ["wallet-multisig"], "comment": "Assumed for the example." },
+    { "id": "p-verify-address", "mechanism": "M-D-VERIFY-ADDRESS", "scope": ["wallet-main1", "wallet-multisig"], "comment": "Assumed for the example." },
+    { "id": "p-cross-check", "mechanism": "M-D-CROSS-CHECK-TRANSACTION", "scope": ["wallet-multisig"], "comment": "Assumed for the example." },
+    { "id": "p-firmware-verify", "mechanism": "M-P-FIRMWARE-VERIFY", "comment": "Assumed for the example." },
+    { "id": "p-workspace", "mechanism": "M-P-PRIVATE-WORKSPACE", "comment": "Assumed: whenever a seed, passphrase or PIN is created or entered, the room is cleared of observers and cameras first." },
+    { "id": "p-education", "mechanism": "M-P-EDUCATION", "comment": "Assumed for the example." },
+    { "id": "p-plan-review", "mechanism": "M-D-PLAN-REVIEW", "comment": "Assumed for the example." },
+    { "id": "p-people-check", "mechanism": "M-D-PEOPLE-CHECK", "comment": "Assumed: once a year the husband calls the wife, the kid and Uncle Jim." },
+    { "id": "p-review-plan", "mechanism": "M-P-REVIEW-PLAN", "comment": "Assumed: the inheritance plan is updated every year and after every change." },
+    { "id": "p-location-inspection", "mechanism": "M-D-LOCATION-INSPECTION", "scope": ["loc-home", "loc-depositbox"], "comment": "Assumed: the home and the deposit box are looked at once a year; the buried spot and the relative's home are not visited." }
+  ]
+}

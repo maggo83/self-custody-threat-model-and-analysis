@@ -1,0 +1,119 @@
+{
+  "schema_version": "0.9",
+  "name": "Test setup",
+  "comment": "Fixture of the engine tests. Every entity exists to make some outcome predictable; see tests/test_engine.py. Five wallets: w-single (all at home), w-multi (2 of 3 with passphrase, delayed fallback, custom descriptor), w-spread (2 of 4, one signer per person and place), w-trip (tripwire next to the home secrets), w-pin (PIN-protected device, seed backup at the trustee).",
+  "people": [
+    { "id": "alice", "name": "Alice", "roles": ["owner"], "may_spend": [{ "wallets": ["w-single", "w-multi", "w-pin"] }, { "with": ["dave"], "wallets": ["w-pin"] }, { "with": ["bob"], "wallets": ["w-spread"] }, { "with": ["carol"], "wallets": ["w-spread"] }, { "with": ["dave"], "wallets": ["w-spread"] }] },
+    { "id": "bob", "name": "Bob", "roles": ["owner"], "may_spend": [{ "wallets": ["w-single", "w-multi"] }, { "with": ["carol"], "wallets": ["w-spread"] }, { "with": ["dave"], "wallets": ["w-spread"] }] },
+    { "id": "carol", "name": "Carol", "roles": ["heir"], "may_spend": [{ "with": ["dave"], "wallets": ["w-spread"] }] },
+    { "id": "dave", "name": "Dave", "roles": ["trustee"], "may_spend": [{ "after_blocks": 52000, "wallets": ["w-multi"] }, { "wallets": ["w-pin"] }] }
+  ],
+  "locations": [
+    { "id": "loc-home", "name": "Home", "kind": "home", "jurisdiction": "A", "near": ["loc-office"], "access": ["alice", "bob"] },
+    { "id": "loc-safe", "name": "Safe in the home", "kind": "home_safe", "part_of": "loc-home", "access": ["alice"] },
+    { "id": "loc-office", "name": "Office", "kind": "workplace", "jurisdiction": "A", "access": ["alice", "bob"], "comment": "Only home declares the near link; it must work both ways." },
+    { "id": "loc-bank", "name": "Deposit box", "kind": "safe_deposit_box", "jurisdiction": "A", "provider": "Bank X", "access": ["alice", "bob"] },
+    { "id": "loc-cloud", "name": "Cloud", "kind": "cloud", "provider": "Cloud Y", "access": ["alice", "bob"] },
+    { "id": "loc-cloud2", "name": "Second cloud account", "kind": "cloud", "provider": "Cloud Y", "access": ["alice", "bob"] },
+    { "id": "loc-far", "name": "Relative far away", "kind": "relative_home", "jurisdiction": "B", "access": ["alice", "bob", "dave"] },
+    { "id": "loc-w3a", "name": "Hiding place A", "kind": "buried", "access": ["alice"] },
+    { "id": "loc-w3b", "name": "Hiding place B", "kind": "buried", "access": ["bob"] },
+    { "id": "loc-w3c", "name": "Hiding place C", "kind": "buried", "access": ["carol"] },
+    { "id": "loc-w3d", "name": "Hiding place D", "kind": "buried", "access": ["dave"] }
+  ],
+  "strips": [
+    { "id": "strip-1", "name": "Strip of bag 1", "serial": "TEST-0001", "stored_in": { "location": "loc-bank" } }
+  ],
+  "bags": [
+    { "id": "bag-1", "name": "Bag in the deposit box", "strip": "strip-1", "stored_in": { "location": "loc-bank" } }
+  ],
+  "devices": [
+    { "id": "d1", "name": "w-single device", "vendor": "BitBox", "model": "BitBox02 Nova", "supply_chain": ["vendor"], "stored_in": { "location": "loc-home" } },
+    { "id": "d2a", "name": "w-multi signer a", "vendor": "BitBox", "model": "BitBox02 Nova", "supply_chain": ["vendor", "reseller"], "stored_in": { "location": "loc-safe" }, "comment": "Same model as d1." },
+    { "id": "d2b", "name": "w-multi signer b", "vendor": "Blockstream", "model": "Jade Plus (Plastic)", "stored_in": { "location": "loc-office" } },
+    { "id": "d2c", "name": "w-multi signer c", "vendor": "Ledger", "model": "Nano X", "stores_descriptors": ["desc-w2"], "stored_in": { "location": "loc-far" } },
+    { "id": "d2f", "name": "w-multi fallback", "vendor": "Ledger", "model": "Nano S Plus", "stored_in": { "location": "loc-far" } },
+    { "id": "d3a", "name": "w-spread a", "vendor": "Trezor", "model": "Safe 3", "stored_in": { "location": "loc-w3a" } },
+    { "id": "d3b", "name": "w-spread b", "vendor": "Trezor", "model": "Safe 3", "stored_in": { "location": "loc-w3b" }, "comment": "Same model as d3a." },
+    { "id": "d3c", "name": "w-spread c", "vendor": "SeedSigner", "model": "SeedSigner", "stored_in": { "location": "loc-w3c" } },
+    { "id": "d3d", "name": "w-spread d", "vendor": "Specter Solutions", "model": "Specter DIY", "stored_in": { "location": "loc-w3d" } },
+    { "id": "d4", "name": "w-trip device", "vendor": "Trezor", "model": "Model One", "stored_in": { "location": "loc-home" } },
+    { "id": "d5", "name": "w-pin device", "vendor": "Trezor", "model": "Model T", "pin": "pin5", "stored_in": { "location": "loc-home" } }
+  ],
+  "seeds": [
+    { "id": "s1", "name": "w-single", "devices": ["d1"] },
+    { "id": "s2a", "name": "w-multi a", "devices": ["d2a"] },
+    { "id": "s2b", "name": "w-multi b", "devices": ["d2b"] },
+    { "id": "s2c", "name": "w-multi c", "devices": ["d2c"] },
+    { "id": "s2f", "name": "w-multi fallback", "devices": ["d2f"] },
+    { "id": "s3a", "name": "w-spread a", "generation": "dice", "devices": ["d3a"] },
+    { "id": "s3b", "name": "w-spread b", "devices": ["d3b"] },
+    { "id": "s3c", "name": "w-spread c", "devices": ["d3c"] },
+    { "id": "s3d", "name": "w-spread d", "devices": ["d3d"] },
+    { "id": "s4", "name": "w-trip", "devices": ["d4"] },
+    { "id": "s5", "name": "w-pin", "devices": ["d5"] }
+  ],
+  "passphrases": [{ "id": "pp2a", "name": "Passphrase of signer a" }],
+  "pins": [
+    { "id": "pin5", "name": "PIN of d5" },
+    { "id": "pin-coord", "name": "Coordinator password" }
+  ],
+  "descriptors": [
+    { "id": "desc-w2", "name": "w-multi descriptor", "wallet": "w-multi" },
+    { "id": "desc-w3", "name": "w-spread descriptor", "wallet": "w-spread" }
+  ],
+  "computing_devices": [
+    { "id": "pc1", "name": "Desktop computer", "kind": "desktop", "stored_in": { "location": "loc-home" } },
+    { "id": "laptop2", "name": "Alice's laptop", "kind": "laptop", "stored_in": { "person": "alice" } }
+  ],
+  "coordinators": [
+    { "id": "coord1", "name": "Coordinator", "product": "Sparrow", "password": "pin-coord", "runs_on": "pc1" },
+    { "id": "coord2", "name": "Second coordinator", "product": "Sparrow", "runs_on": "laptop2" }
+  ],
+  "wallets": [
+    { "id": "w-single", "name": "Single-sig", "coordinator": "coord2", "spending_policies": [{ "signers": [{ "seed": "s1" }], "threshold": 1 }] },
+    {
+      "id": "w-multi",
+      "name": "2 of 3 with fallback",
+      "spending_policies": [
+        { "signers": [{ "seed": "s2a", "passphrase": "pp2a" }, { "seed": "s2b" }, { "seed": "s2c" }], "threshold": 2 },
+        { "signers": [{ "seed": "s2f" }], "threshold": 1, "delay_blocks": 52000 }
+      ],
+      "descriptor": "desc-w2",
+      "definition": "custom",
+      "coordinator": "coord1"
+    },
+    { "id": "w-spread", "name": "2 of 4, one signer per person", "coordinator": "coord2", "spending_policies": [{ "signers": [{ "seed": "s3a" }, { "seed": "s3b" }, { "seed": "s3c" }, { "seed": "s3d" }], "threshold": 2 }], "descriptor": "desc-w3" },
+    { "id": "w-trip", "name": "Tripwire", "coordinator": "coord2", "spending_policies": [{ "signers": [{ "seed": "s4" }], "threshold": 1 }], "tripwire": { "enabled": true } },
+    { "id": "w-pin", "name": "Single-sig behind a PIN", "coordinator": "coord2", "spending_policies": [{ "signers": [{ "seed": "s5" }], "threshold": 1 }] }
+  ],
+  "backups": [
+    { "id": "b1", "name": "s1 paper", "medium": "paper", "stored_in": { "location": "loc-home" }, "items": [{ "subject": { "seed": "s1" }, "format": "words" }] },
+    { "id": "b2a", "name": "s2a paper", "medium": "paper", "stored_in": { "location": "loc-safe" }, "items": [{ "subject": { "seed": "s2a" }, "format": "words" }] },
+    { "id": "b2b", "name": "s2b paper", "medium": "paper", "stored_in": { "location": "loc-office" }, "items": [{ "subject": { "seed": "s2b" }, "format": "words" }] },
+    { "id": "b2c", "name": "s2c metal", "medium": "metal", "product": { "vendor": "BitBox", "model": "Steelwallet" }, "stored_in": { "location": "loc-bank" }, "items": [{ "subject": { "seed": "s2c" }, "format": "words" }], "comment": "Fireproof product." },
+    { "id": "b2f", "name": "s2f paper", "medium": "paper", "stored_in": { "location": "loc-far" }, "items": [{ "subject": { "seed": "s2f" }, "format": "words" }] },
+    { "id": "b-desc-bank", "name": "w-multi descriptor in the bag", "medium": "paper", "stored_in": { "bag": "bag-1" }, "items": [{ "subject": { "descriptor": "desc-w2" }, "format": "text" }] },
+    { "id": "b-desc-cloud", "name": "w-multi descriptor in the cloud", "medium": "cloud_storage", "stored_in": { "location": "loc-cloud" }, "items": [{ "subject": { "descriptor": "desc-w2" }, "format": "file", "encrypted_with": [{ "seed": "s2b" }, { "seed": "s2c" }] }] },
+    { "id": "b3a", "name": "s3a paper", "medium": "paper", "stored_in": { "location": "loc-w3a" }, "items": [{ "subject": { "seed": "s3a" }, "format": "words" }] },
+    { "id": "b3b", "name": "s3b paper", "medium": "paper", "stored_in": { "location": "loc-w3b" }, "items": [{ "subject": { "seed": "s3b" }, "format": "words" }] },
+    { "id": "b3c", "name": "s3c paper", "medium": "paper", "stored_in": { "location": "loc-w3c" }, "items": [{ "subject": { "seed": "s3c" }, "format": "words" }] },
+    { "id": "b3d", "name": "s3d paper", "medium": "paper", "stored_in": { "location": "loc-w3d" }, "items": [{ "subject": { "seed": "s3d" }, "format": "words" }] },
+    { "id": "b4", "name": "s4 paper", "medium": "paper", "stored_in": { "location": "loc-home" }, "items": [{ "subject": { "seed": "s4" }, "format": "words" }] },
+    { "id": "b5", "name": "s5 paper at the trustee", "medium": "paper", "stored_in": { "location": "loc-w3d" }, "items": [{ "subject": { "seed": "s5" }, "format": "words" }] },
+    { "id": "b-desc-w3-far", "name": "w-spread descriptor at the relative", "medium": "paper", "stored_in": { "location": "loc-far" }, "items": [{ "subject": { "descriptor": "desc-w3" }, "format": "text" }], "comment": "Copies of a default descriptor: without them it can only be rebuilt from all four signers." },
+    { "id": "b-desc-w3-cloud", "name": "w-spread descriptor in the second cloud account", "medium": "cloud_storage", "stored_in": { "location": "loc-cloud2" }, "items": [{ "subject": { "descriptor": "desc-w3" }, "format": "file" }] },
+    { "id": "bk-head", "name": "Memorised secrets of Alice", "medium": "memory", "stored_in": { "person": "alice" }, "items": [{ "subject": { "passphrase": "pp2a" }, "format": "text" }, { "subject": { "pin": "pin5" }, "format": "text" }, { "subject": { "pin": "pin-coord" }, "format": "text" }] },
+    { "id": "b-plan", "name": "Plan in a second cloud account", "medium": "cloud_storage", "stored_in": { "location": "loc-cloud2" }, "items": [{ "subject": { "plan": true }, "format": "pdf" }] }
+  ],
+  "practices": [
+    { "id": "p-tripwire", "mechanism": "M-D-TRIPWIRE", "scope": ["w-trip"] },
+    { "id": "p-cross-check", "mechanism": "M-D-CROSS-CHECK-TRANSACTION", "scope": ["w-multi"] },
+    { "id": "p-test-tx", "mechanism": "M-D-TEST-TX", "scope": ["w-multi"] },
+    { "id": "p-backup-verify", "mechanism": "M-D-BACKUP-VERIFY" },
+    { "id": "p-device-check", "mechanism": "M-D-DEVICE-CHECK" },
+    { "id": "p-education", "mechanism": "M-P-EDUCATION" },
+    { "id": "p-timelock", "mechanism": "M-P-REFRESH-TIMELOCK", "scope": ["w-multi"] },
+    { "id": "p-own-node", "mechanism": "M-P-OWN-NODE", "scope": ["coord1"] }
+  ]
+}

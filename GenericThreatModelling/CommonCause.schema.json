@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "CommonCause.schema.json",
+  "title": "Common-cause groups",
+  "description": "Entities of one class that agree on all `group_by` attributes are hit together by the listed threats. Paths are attributes of the entity in the plan, `catalog.<column>` for its lookup row, and `<list>[].<field>` for a list-valued field (compared as a set). An empty `group_by` puts every entity of the class in one group; a missing attribute equals a missing attribute, except that entities lacking all grouping attributes never form a group.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["groups"],
+  "properties": {
+    "status": { "type": "string" },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["threats", "class", "group_by", "reason"],
+        "properties": {
+          "threats": { "type": "array", "minItems": 1, "items": { "$ref": "ThreatModelCommon.schema.json#/$defs/threatId" } },
+          "class": { "$ref": "ThreatModelCommon.schema.json#/$defs/entityClass" },
+          "group_by": { "type": "array", "items": { "type": "string" } },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

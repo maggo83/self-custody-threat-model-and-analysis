@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ThreatModelCommon.schema.json",
+  "title": "Shared definitions of the threat model catalogues (threats, recovery actions, mechanisms)",
+  "$defs": {
+    "entityClass": {
+      "description": "Name of a class of the setup ontology (table x-classes in SetupOntology.schema.json, drawn in SetupOntology.md); the loader checks it.",
+      "type": "string"
+    },
+    "category": {
+      "description": "human: acts of people. physical: fire, water, force, environment. supply_chain: tampering before the item reaches the owner. defect: failure, ageing, bugs. software: malicious or faulty software and hosts. randomness: weak or manipulated generation. operational: mistakes and omissions in running the setup. legal: law, courts, authorities. third_party: vendor or provider business risk.",
+      "enum": ["human", "physical", "supply_chain", "defect", "software", "randomness", "operational", "legal", "third_party"]
+    },
+    "source": {
+      "description": "One cause. environment and owner act without malice; the others are actors against the setup.",
+      "enum": ["environment", "owner", "insider", "outsider", "vendor", "state", "provider"],
+      "x-malicious": ["insider", "outsider", "vendor", "state", "provider"]
+    },
+    "phase": {
+      "description": "Lifecycle activity in which a threat can strike.",
+      "enum": ["setup", "generation", "storage", "use", "maintenance", "recovery"]
+    },
+    "impactOn": {
+      "description": "Which items are affected, relative to the target entity. self: the target (for a secret: the secret as information). contents: everything stored in or at a Location or TamperEvidentBag, recursively through sub-locations and bags. intrusion_contents: what an intruder finds: everything in view, and a concealed sub-location only when it is the target itself (then the visible parts above it as well). area_contents: contents of the Location and of every location linked to it by `near` (close enough to be hit by the same area-wide event). knowledge: items in the Person's memory (backups with medium memory at the Person's location). access: contents of all locations the Person can physically reach. items: the secrets and plan copies carried by a Backup. loaded_seeds: seeds loaded on a SigningDevice. same_model_devices / same_vendor_devices: all other devices of the plan with the same catalog model or vendor. wallets: wallets that depend on the target (via a seed, a device, the coordinator or the descriptor). protects: what the target secret protects (devices using it as PIN, items encrypted with it, wallets whose signers use it).",
+      "enum": ["self", "contents", "intrusion_contents", "area_contents", "knowledge", "access", "items", "loaded_seeds", "same_model_devices", "same_vendor_devices", "wallets", "protects"]
+    },
+    "impactKind": {
+      "description": "destroyed: gone for good. unavailable: cannot be used for now or until some action is taken. disclosed: an attacker obtains a copy or the knowledge. tampered: content or state is changed, replaced or wrong. controlled: the attacker can make the item act as he wants. misused: the holder uses what they can reach or know in an unintended way (impaired judgement).",
+      "enum": ["destroyed", "unavailable", "disclosed", "tampered", "controlled", "misused"],
+      "x-leak": ["disclosed", "misused"]
+    },
+    "threatId": { "type": "string", "pattern": "^T-[A-Z0-9]+(-[A-Z0-9]+)+$" },
+    "actionId": { "type": "string", "pattern": "^R-[A-Z0-9]+(-[A-Z0-9]+)*$" },
+    "mechanismId": { "type": "string", "pattern": "^M-[PDG]-[A-Z0-9]+(-[A-Z0-9]+)*$" },
+    "origin": {
+      "description": "Review aid: whether the entry comes from the original notes or was added during the completion pass. Can be dropped later.",
+      "enum": ["notes", "added"]
+    },
+    "condition": {
+      "description": "Test on one attribute. `path` is an attribute of the item under test as it appears in the plan JSON (e.g. `kind`, `medium`, `generation`), or `catalog.<column>` for the item's row in a lookup table (device catalog for SigningDevice, metal backup catalog for Backup via its `product`, LocationKinds for Location). List-valued attributes match if any element matches. An attribute or catalog value that is missing or blank never satisfies `in` or `matches`, and always satisfies `not_in` and `not_matches` (unknown counts as not satisfied).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string" },
+        "in": { "type": "array", "items": {} },
+        "not_in": { "type": "array", "items": {} },
+        "matches": { "type": "string", "description": "Regular expression." },
+        "not_matches": { "type": "string", "description": "Regular expression." }
+      },
+      "oneOf": [
+        { "required": ["in"] },
+        { "required": ["not_in"] },
+        { "required": ["matches"] },
+        { "required": ["not_matches"] }
+      ]
+    },
+    "conditions": {
+      "description": "All conditions must hold.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/condition" }
+    },
+    "predicate": {
+      "description": "A named test that is too structural for a condition (graph or count questions). Implemented by the analysis; the name is the contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "params": { "type": "object" }
+      }
+    }
+  }
+}

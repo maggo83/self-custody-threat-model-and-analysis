@@ -1,0 +1,74 @@
+{
+  "status": "draft, to be curated",
+  "scales": {
+    "likelihood": {
+      "description": "Chance that the threat manifests as described over the lifetime of the setup (horizon_years), before looking at our measures.",
+      "horizon_years": 50,
+      "bands": [
+        { "value": 0, "probability": "< 0.1 %" },
+        { "value": 1, "probability": "0.1 % to 1 %" },
+        { "value": 2, "probability": "1 % to 10 %" },
+        { "value": 3, "probability": "10 % to 50 %" },
+        { "value": 4, "probability": "> 50 %" }
+      ]
+    },
+    "vulnerability": {
+      "description": "Chance that the threat gets through our measures and causes its outcome. 0 = reliably prevented, or detected and answered in time; 4 = no effective protection.",
+      "bands": [
+        { "value": 0, "probability": "< 0.1 %" },
+        { "value": 1, "probability": "0.1 % to 1 %" },
+        { "value": 2, "probability": "1 % to 10 %" },
+        { "value": 3, "probability": "10 % to 50 %" },
+        { "value": 4, "probability": "> 50 %" }
+      ]
+    },
+    "severity": {
+      "description": "Worst credible outcome; loss means lost or stolen, which is not distinguished.",
+      "bands": [
+        { "value": 0, "label": "none" },
+        { "value": 1, "label": "inconvenience, or latent fault with margin left" },
+        { "value": 2, "label": "latent fault without margin, or temporary lock-out of main funds" },
+        { "value": 3, "label": "privacy loss, loss of auxiliary funds, or an owner loses every way to the main funds" },
+        { "value": 4, "label": "loss of main funds" }
+      ]
+    }
+  },
+  "outcomes": {
+    "none": { "severity": 0, "description": "No effect on any wallet." },
+    "inconvenience": { "severity": 1, "description": "Nothing is lost; a recovery action is needed." },
+    "latent_margin": { "severity": 1, "description": "A fault is present, but no single further failure makes funds unusable or stolen." },
+    "latent_no_margin": { "severity": 2, "description": "A fault is present and one further failure makes funds unusable or stolen." },
+    "lockout_temporary": { "severity": 2, "description": "Main funds cannot be used for now (delay, unavailable parts, missing descriptor) but nothing is lost for good." },
+    "privacy_loss": { "severity": 3, "description": "Holdings or structure of the setup become known to others." },
+    "owner_access_lost": { "severity": 3, "description": "An owner loses every way to the main funds while another owner keeps one." },
+    "aux_loss": { "severity": 3, "description": "Auxiliary (tripwire) funds are lost or stolen." },
+    "main_loss": { "severity": 4, "description": "Main funds are lost or stolen." }
+  },
+  "protection": {
+    "description": "Vulnerability = 4 - protection. Protection comes from the strongest mechanism that is present in the setup; a prevention and a detection together add a bonus.",
+    "prevention": { "eliminates": 4, "reduces": 1 },
+    "detection": {
+      "requires_response": true,
+      "self_responding_triggers": ["before_each_use"],
+      "by_trigger": { "continuous": 2, "before_each_use": 2, "after_each_use": 2, "on_event": 1, "on_change": 1, "at_setup": 1 },
+      "by_interval_months": [{ "max": 12, "value": 2 }, { "max": 36, "value": 1 }],
+      "setup_check": { "description": "A check done at setup finds every fault that was made at or before setup almost surely: a restore test shows a wrong backup, a test transaction a wrong policy.", "phases": ["setup", "generation"], "value": 3 },
+      "fast_enough": { "immediate": ["continuous"], "at_use": ["continuous", "before_each_use"], "at_recovery": "any", "after_delay": "any", "none": "any" }
+    },
+    "after_delay": { "description": "Protection against an attacker who can spend only after the delay of a policy has passed: a mechanism that keeps the funds from ever reaching that delay (refreshing them in time) counts with these values; detections count with any schedule, there is time to react.", "reduces": 2, "eliminates": 4 },
+    "travel_minutes": [{ "at_least": 15, "value": 1 }, { "at_least": 30, "value": 2 }, { "at_least": 120, "value": 3 }],
+    "bonus_prevention_and_detection": 1,
+    "max": 4
+  },
+  "residual_likelihood": { "formula": "likelihood + vulnerability - 4", "min": 0, "max": 4 },
+  "risk_matrix": {
+    "description": "Rows: residual likelihood 0 to 4. Columns: severity 0 to 4. Values: risk 0 to 4.",
+    "values": [
+      [0, 0, 0, 0, 1],
+      [0, 0, 0, 1, 2],
+      [0, 0, 1, 2, 3],
+      [0, 1, 2, 3, 4],
+      [0, 2, 3, 4, 4]
+    ]
+  }
+}

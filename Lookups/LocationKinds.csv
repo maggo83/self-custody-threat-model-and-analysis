@@ -1,0 +1,11 @@
+kind,concealment,physical_security,intrusion_alerting,remote,origin
+home,known to household and visitors,low,none,no,plan
+home_safe,known to household,medium,none,no,plan
+hidden_at_home,secret,low,none,no,plan
+safe_deposit_box,known to the bank,high,bank-managed,no,plan
+relative_home,known to the relative,low,none,no,plan
+buried,secret,medium; hard to retrieve,none,no,plan
+walled_in,secret,medium; hard to retrieve,none,no,plan
+workplace,known,low,none,no,plan
+cloud,provider-dependent,provider-dependent,provider-dependent,yes,plan
+person,secret (knowledge in someone's head),n/a,none,yes,tool

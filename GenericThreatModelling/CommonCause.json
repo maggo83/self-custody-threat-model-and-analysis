@@ -1,0 +1,16 @@
+{
+  "status": "draft, to be curated",
+  "groups": [
+    { "threats": ["T-BAK-AGEING", "T-BAK-ILLEGIBLE"], "class": "Backup", "group_by": ["medium", "catalog.material"], "reason": "Backups of the same medium and material degrade alike." },
+    { "threats": ["T-BAK-MEDIUM-OBSOLETE"], "class": "Backup", "group_by": ["medium", "items[].format"], "reason": "Backups of the same medium and item format become unreadable together." },
+    { "threats": ["T-BAK-CANNOT-DECRYPT", "T-BAK-ENCRYPTION-WEAKNESS"], "class": "Backup", "group_by": ["items[].encrypted_with"], "reason": "Items encrypted with the same keys share the same scheme." },
+    { "threats": ["T-DEV-AGEING", "T-DEV-INTERFACE-OBSOLETE"], "class": "SigningDevice", "group_by": ["vendor", "model"], "reason": "Devices of the same model age and become obsolete together." },
+    { "threats": ["T-DEV-UPDATE-BRICK"], "class": "SigningDevice", "group_by": ["vendor", "model", "firmware.version"], "reason": "The same update affects every device on the same firmware." },
+    { "threats": ["T-DEV-SUPPLY-CHAIN"], "class": "SigningDevice", "group_by": ["vendor", "model", "supply_chain"], "reason": "Devices that travelled the same way can share a tampered batch." },
+    { "threats": ["T-SEED-SCHEME-WEAKNESS"], "class": "Seed", "group_by": ["scheme"], "reason": "A weakness of a seed scheme hits every seed of that scheme." },
+    { "threats": ["T-WALLET-SIGNATURE-WEAKNESS", "T-WALLET-HASH-WEAKNESS", "T-WALLET-CONSENSUS-CHANGE"], "class": "Wallet", "group_by": [], "reason": "A protocol-level event hits every wallet." },
+    { "threats": ["T-LOC-JURISDICTION-CHANGE"], "class": "Location", "group_by": ["jurisdiction"], "reason": "A change of law hits every location in the jurisdiction." },
+    { "threats": ["T-LOC-PROVIDER-STAFF", "T-LOC-BANK-SEIZURE", "T-LOC-CLOUD-ACCOUNT-LOSS", "T-LOC-CLOUD-BREACH"], "class": "Location", "group_by": ["provider"], "reason": "Locations of the same provider share its failures." },
+    { "threats": ["T-COORD-SOFTWARE-BUG", "T-COORD-SOFTWARE-MALICIOUS", "T-COORD-BACKDOOR", "T-COORD-DISCONTINUED"], "class": "Coordinator", "group_by": ["product"], "reason": "Installations of the same product share its defects." }
+  ]
+}

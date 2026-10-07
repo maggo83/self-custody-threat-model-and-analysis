@@ -1,0 +1,41 @@
+{
+  "schema_version": "0.9",
+  "name": "12 Multisig with a tripwire, tripwire recognisable",
+  "comment": "Same as 11, but one copy of the multisig descriptor is kept at home next to the tripwire. The tripwire seed is also a signer of the multisig here, so a burglar who reads the descriptor sees that the tripwire key belongs to a bigger wallet and is unlikely to touch it: the tripwire counts less.",
+  "people": [{ "id": "alice", "name": "Alice", "roles": ["owner"], "may_spend": [{}] }],
+  "locations": [
+    { "id": "loc-home", "name": "Home", "kind": "home", "access": ["alice"] },
+    { "id": "loc-bank", "name": "Deposit box", "kind": "safe_deposit_box", "provider": "Bank", "access": ["alice"] },
+    { "id": "loc-far", "name": "Relative far away", "kind": "relative_home", "access": ["alice"] }
+  ],
+  "travel_times": [
+    { "from": "loc-home", "to": "loc-bank", "minutes": 30 },
+    { "from": "loc-home", "to": "loc-far", "minutes": 180 },
+    { "from": "loc-bank", "to": "loc-far", "minutes": 180 }
+  ],
+  "devices": [
+    { "id": "d1", "name": "Device 1", "use": "regular", "vendor": "BitBox", "model": "BitBox02", "stored_in": { "location": "loc-home" } },
+    { "id": "d2", "name": "Device 2", "vendor": "Coinkite", "model": "Coldcard Mk4", "stored_in": { "location": "loc-bank" } },
+    { "id": "d3", "name": "Device 3", "vendor": "Blockstream", "model": "Jade", "stored_in": { "location": "loc-far" } }
+  ],
+  "seeds": [
+    { "id": "s1", "name": "Seed 1 (also the tripwire key)", "devices": ["d1"] },
+    { "id": "s2", "name": "Seed 2", "devices": ["d2"] },
+    { "id": "s3", "name": "Seed 3", "devices": ["d3"] }
+  ],
+  "descriptors": [{ "id": "desc1", "name": "Multisig descriptor", "wallet": "w1" }],
+  "backups": [
+    { "id": "b1", "name": "Seed 1, paper", "medium": "paper", "stored_in": { "location": "loc-home" }, "items": [{ "subject": { "seed": "s1" }, "format": "words" }] },
+    { "id": "b2", "name": "Seed 2, paper", "medium": "paper", "stored_in": { "location": "loc-bank" }, "items": [{ "subject": { "seed": "s2" }, "format": "words" }] },
+    { "id": "b3", "name": "Seed 3, paper", "medium": "paper", "stored_in": { "location": "loc-far" }, "items": [{ "subject": { "seed": "s3" }, "format": "words" }] },
+    { "id": "bd1", "name": "Descriptor, printout at home", "medium": "paper", "stored_in": { "location": "loc-home" }, "items": [{ "subject": { "descriptor": "desc1" }, "format": "text" }] },
+    { "id": "bd2", "name": "Descriptor, printout in the box", "medium": "paper", "stored_in": { "location": "loc-bank" }, "items": [{ "subject": { "descriptor": "desc1" }, "format": "text" }] }
+  ],
+  "computing_devices": [{ "id": "laptop", "name": "Laptop", "kind": "laptop", "use": "regular", "stored_in": { "location": "loc-home" } }],
+  "coordinators": [{ "id": "coord", "name": "Coordinator", "product": "Sparrow", "runs_on": "laptop" }],
+  "wallets": [
+    { "id": "w1", "name": "Multisig 2 of 3", "coordinator": "coord", "descriptor": "desc1", "spending_policies": [{ "signers": [{ "seed": "s1" }, { "seed": "s2" }, { "seed": "s3" }], "threshold": 2 }] },
+    { "id": "wt", "name": "Tripwire (single-sig with key 1)", "coordinator": "coord", "tripwire": { "enabled": true }, "spending_policies": [{ "signers": [{ "seed": "s1" }], "threshold": 1 }] }
+  ],
+  "practices": [{ "id": "p-tripwire", "mechanism": "M-D-TRIPWIRE", "scope": ["wt"], "comment": "Assumed: the balance is watched." }]
+}

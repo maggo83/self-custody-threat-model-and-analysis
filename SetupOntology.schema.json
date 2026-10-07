@@ -1,0 +1,417 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bitcoin custody plan",
+  "description": "Input of the threat analysis: a custody plan. Normative definition of SetupOntology.md. Referential integrity (ids exist, threshold <= signers, memory backups sit in a location of kind person, no bag cycles) is checked outside of this schema.",
+  "x-classes-description": "The classes of the ontology in display order: collection = key of the plan that holds them, parent = abstract superclass. The engine reads this table; SetupOntology.md and the catalogs are checked against it.",
+  "x-classes": {
+    "Person": { "collection": "people" },
+    "Location": { "collection": "locations" },
+    "TamperEvidentBag": { "collection": "bags" },
+    "BagStrip": { "collection": "strips" },
+    "Device": { "abstract": true },
+    "SigningDevice": { "parent": "Device", "collection": "devices" },
+    "ComputingDevice": { "parent": "Device", "collection": "computing_devices" },
+    "Backup": { "collection": "backups" },
+    "Secret": { "abstract": true },
+    "Seed": { "parent": "Secret", "collection": "seeds", "credential": true },
+    "Passphrase": { "parent": "Secret", "collection": "passphrases", "credential": true },
+    "PinPassword": { "parent": "Secret", "collection": "pins", "credential": true },
+    "Descriptor": { "parent": "Secret", "collection": "descriptors" },
+    "Wallet": { "collection": "wallets" },
+    "Coordinator": { "collection": "coordinators" },
+    "Plan": {},
+    "Signer": { "nested": true },
+    "SpendingPolicy": { "nested": true },
+    "BackupItem": { "nested": true }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "name", "wallets", "coordinators"],
+  "properties": {
+    "schema_version": { "const": "0.9" },
+    "name": { "type": "string" },
+    "comment": { "$ref": "#/$defs/comment" },
+    "last_reviewed": { "type": "string", "format": "date" },
+    "review_interval_days": { "type": "integer", "minimum": 1 },
+    "people": { "type": "array", "items": { "$ref": "#/$defs/person" } },
+    "locations": { "type": "array", "items": { "$ref": "#/$defs/location" } },
+    "bags": { "type": "array", "items": { "$ref": "#/$defs/bag" } },
+    "strips": { "type": "array", "items": { "$ref": "#/$defs/strip" } },
+    "devices": { "description": "Signing devices: hold seeds and descriptors, never coordinator software.", "type": "array", "items": { "$ref": "#/$defs/device" } },
+    "computing_devices": { "description": "Phones, laptops and desktop computers: hold coordinator software, seeds, descriptors and any digital file.", "type": "array", "items": { "$ref": "#/$defs/computingDevice" } },
+    "seeds": { "type": "array", "items": { "$ref": "#/$defs/seed" } },
+    "passphrases": { "type": "array", "items": { "$ref": "#/$defs/secretEntity" } },
+    "pins": { "type": "array", "items": { "$ref": "#/$defs/secretEntity" } },
+    "descriptors": { "type": "array", "items": { "$ref": "#/$defs/descriptor" } },
+    "wallets": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/wallet" } },
+    "coordinators": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/coordinator" } },
+    "backups": { "type": "array", "items": { "$ref": "#/$defs/backup" } },
+    "practices": { "type": "array", "items": { "$ref": "#/$defs/practice" } },
+    "travel_times": {
+      "description": "Travel time in minutes between two places, in both directions. Sub-locations count as their top-level place; cloud and person places need no travel.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "minutes"],
+        "properties": { "from": { "$ref": "#/$defs/id", "x-ref": "Location" }, "to": { "$ref": "#/$defs/id", "x-ref": "Location" }, "minutes": { "type": "integer", "minimum": 0 } }
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "idList": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+    "comment": { "type": "string" },
+
+    "practice": {
+      "description": "A procedural mechanism the owners commit to. Static: no tracking of when it was done.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "mechanism"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "comment": { "$ref": "#/$defs/comment" },
+        "mechanism": { "type": "string", "pattern": "^M-[PD]-[A-Z0-9]+(-[A-Z0-9]+)*$" },
+        "scope": { "$ref": "#/$defs/idList" },
+        "interval_months": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "storedIn": {
+      "description": "Exactly one of a location, a tamper-evident bag, or a person (what someone keeps in mind or carries along).",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["location"], "properties": { "location": { "$ref": "#/$defs/id", "x-ref": "Location" } } },
+        { "type": "object", "additionalProperties": false, "required": ["person"], "properties": { "person": { "$ref": "#/$defs/id", "x-ref": "Person" } } },
+        { "type": "object", "additionalProperties": false, "required": ["bag"], "properties": { "bag": { "$ref": "#/$defs/id", "x-ref": "TamperEvidentBag" } } }
+      ]
+    },
+
+    "person": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "description": "Pseudonym." },
+        "comment": { "$ref": "#/$defs/comment" },
+        "roles": { "description": "Informational, except `owner`: the loss of access of owners decides the severity.", "type": "array", "uniqueItems": true, "items": { "enum": ["owner", "heir", "trustee"] } },
+        "may_spend": {
+          "description": "When this person should be able to spend, alone or together with others. The analysis checks whether the setup gives them that access; nothing links a right to a spending policy.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "with": { "description": "Others who must act together with this person; default: alone.", "$ref": "#/$defs/idList", "x-ref": "Person" },
+              "after_blocks": { "description": "Not before this many blocks (144 blocks are about a day), the unit of spending policy delays; default: at once.", "type": "integer", "minimum": 0 },
+              "wallets": { "description": "Default: every main wallet.", "$ref": "#/$defs/idList", "x-ref": "Wallet" }
+            }
+          }
+        }
+      }
+    },
+
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "kind"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "comment": { "$ref": "#/$defs/comment" },
+        "kind": { "enum": ["home", "home_safe", "hidden_at_home", "safe_deposit_box", "relative_home", "buried", "walled_in", "workplace", "cloud"] },
+        "part_of": { "$ref": "#/$defs/id", "x-ref": "Location" },
+        "jurisdiction": { "type": "string" },
+        "provider": { "type": "string", "description": "Bank or cloud provider if a third party operates the place; absent means private." },
+        "near": { "description": "Locations close enough to be hit by the same area-wide event (flood, earthquake, war). Binary and symmetric; not transitive.", "$ref": "#/$defs/idList", "x-ref": "Location" },
+        "access": { "$ref": "#/$defs/idList", "x-ref": "Person" }
+      }
+    },
+
+    "bag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "strip", "stored_in"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "comment": { "$ref": "#/$defs/comment" },
+        "strip": { "$ref": "#/$defs/id", "x-ref": "BagStrip" },
+        "stored_in": { "$ref": "#/$defs/storedIn" }
+      }
+    },
+
+    "strip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "serial", "stored_in"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "comment": { "$ref": "#/$defs/comment" },
+        "serial": { "type": "string" },
+        "stored_in": { "$ref": "#/$defs/storedIn" }
+      }
+    },
+
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "vendor", "model", "stored_in"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "comment": { "$ref": "#/$defs/comment" },
+        "vendor": { "type": "string", "description": "Key into SigningDeviceCatalog.csv." },
+        "model": { "type": "string", "description": "Key into SigningDeviceCatalog.csv." },
+        "firmware": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "version": { "type": "string" },
+            "source": { "enum": ["preinstalled", "vendor_download", "self_built"] }
+          }
+        },
+        "supply_chain": { "type": "array", "items": { "enum": ["vendor", "reseller", "mail"] } },
+        "pin": { "$ref": "#/$defs/id", "x-ref": "PinPassword" },
+        "use": { "description": "regular: used so often (at least yearly) that it is powered on and found broken or missing anyway; absent: kept away and only used when needed.", "enum": ["regular"] },
+        "stores_descriptors": { "$ref": "#/$defs/idList", "x-ref": "Descriptor" },
+        "stored_in": { "$ref": "#/$defs/storedIn" }
+      }
+    },
+
+    "computingDevice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "kind", "stored_in"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "comment": { "$ref": "#/$defs/comment" },
+        "kind": { "description": "mobile: always carried by a person. desktop: stands in a location. laptop: either.", "enum": ["mobile", "laptop", "desktop"] },
+        "product": { "type": "string", "description": "Operating system or model, informational." },
+        "online": { "description": "Connected to the internet (default true). false for an air-gapped computer.", "type": "boolean" },
+        "use": { "description": "regular: used so often (at least yearly) that it is powered on and a defect noticed anyway.", "enum": ["regular"] },
+        "stores_descriptors": { "$ref": "#/$defs/idList", "x-ref": "Descriptor" },
+        "stored_in": { "$ref": "#/$defs/storedIn" }
+      }
+    },
+
+    "seed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "comment": { "$ref": "#/$defs/comment" },
+        "scheme": { "enum": ["bip39", "slip39", "codex32", "seedxor", "electrum", "aezeed"], "default": "bip39" },
+        "word_count": { "enum": [12, 15, 18, 21, 24], "default": 12 },
+        "generation": { "enum": ["device_rng", "dice", "cards"] },
+        "devices": { "$ref": "#/$defs/idList", "x-ref": "Device" }
+      }
+    },
+
+    "secretEntity": {
+      "description": "Passphrase or PIN/password; no attributes besides the common ones.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "comment": { "$ref": "#/$defs/comment" }
+      }
+    },
+
+    "descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "wallet"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "comment": { "$ref": "#/$defs/comment" },
+        "wallet": { "$ref": "#/$defs/id", "x-ref": "Wallet" }
+      }
+    },
+
+    "signer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seed"],
+      "properties": {
+        "seed": { "$ref": "#/$defs/id", "x-ref": "Seed" },
+        "passphrase": { "$ref": "#/$defs/id", "x-ref": "Passphrase" }
+      }
+    },
+
+    "spendingPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signers", "threshold"],
+      "properties": {
+        "signers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/signer" } },
+        "threshold": { "type": "integer", "minimum": 1 },
+        "delay_blocks": { "type": "integer", "minimum": 0, "maximum": 65535, "default": 0, "description": "Relative timelock; 0 = immediately. Absolute timelocks are not modelled." }
+      }
+    },
+
+    "wallet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "spending_policies", "coordinator"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "comment": { "$ref": "#/$defs/comment" },
+        "spending_policies": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/spendingPolicy" } },
+        "descriptor": { "description": "Mandatory for a wallet with several signers or a custom definition; at most one. Checked outside of this schema, together with the requirement that a copy exists.", "$ref": "#/$defs/id", "x-ref": "Descriptor" },
+        "definition": { "enum": ["default", "custom"], "default": "default", "description": "default = native SegWit with the standard derivation: BIP84 (single-sig) or P2WSH with sorted keys and BIP48 script type 2' (multisig); fully determined by the keys of all signers. custom = anything else; it is not determined by the keys." },
+        "coordinator": { "$ref": "#/$defs/id", "x-ref": "Coordinator" },
+        "tripwire": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "amount_sat": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+
+    "coordinator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "product", "runs_on"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "comment": { "$ref": "#/$defs/comment" },
+        "product": { "type": "string" },
+        "runs_on": { "description": "Computing device the coordinator software runs on. A signing device cannot host it. With a seed on the same device this is a hot wallet.", "$ref": "#/$defs/id", "x-ref": "ComputingDevice" },
+        "password": { "description": "PinPassword that protects the application or its wallet file.", "$ref": "#/$defs/id", "x-ref": "PinPassword" }
+      }
+    },
+
+    "encryptedWith": {
+      "description": "Alternatives: any one of the listed secrets decrypts.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "oneOf": [
+          { "type": "object", "additionalProperties": false, "required": ["seed"], "properties": { "seed": { "$ref": "#/$defs/id", "x-ref": "Seed" } } },
+          { "type": "object", "additionalProperties": false, "required": ["pin"], "properties": { "pin": { "$ref": "#/$defs/id", "x-ref": "PinPassword" } } }
+        ]
+      }
+    },
+
+    "share": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "threshold", "total"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 1 },
+        "threshold": { "type": "integer", "minimum": 1 },
+        "total": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "itemSeed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject", "format"],
+      "properties": {
+        "subject": { "type": "object", "additionalProperties": false, "required": ["seed"], "properties": { "seed": { "$ref": "#/$defs/id", "x-ref": "Seed" } } },
+        "format": { "enum": ["words", "seedqr", "binary", "hex"], "default": "words" },
+        "encrypted_with": { "$ref": "#/$defs/encryptedWith" },
+        "share": { "$ref": "#/$defs/share" }
+      }
+    },
+    "itemDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject", "format"],
+      "properties": {
+        "subject": { "type": "object", "additionalProperties": false, "required": ["descriptor"], "properties": { "descriptor": { "$ref": "#/$defs/id", "x-ref": "Descriptor" } } },
+        "format": { "enum": ["text", "qr", "file"] },
+        "encrypted_with": { "$ref": "#/$defs/encryptedWith" }
+      }
+    },
+    "itemPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject", "format"],
+      "properties": {
+        "subject": { "type": "object", "additionalProperties": false, "required": ["plan"], "properties": { "plan": { "const": true } } },
+        "format": { "enum": ["pdf", "printed"] },
+        "encrypted_with": { "$ref": "#/$defs/encryptedWith" }
+      }
+    },
+    "itemPassphrase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject", "format"],
+      "properties": {
+        "subject": { "type": "object", "additionalProperties": false, "required": ["passphrase"], "properties": { "passphrase": { "$ref": "#/$defs/id", "x-ref": "Passphrase" } } },
+        "format": { "const": "text" },
+        "encrypted_with": { "$ref": "#/$defs/encryptedWith" }
+      }
+    },
+    "itemPin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject", "format"],
+      "properties": {
+        "subject": { "type": "object", "additionalProperties": false, "required": ["pin"], "properties": { "pin": { "$ref": "#/$defs/id", "x-ref": "PinPassword" } } },
+        "format": { "const": "text" },
+        "encrypted_with": { "$ref": "#/$defs/encryptedWith" }
+      }
+    },
+
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "medium", "stored_in", "items"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "comment": { "$ref": "#/$defs/comment" },
+        "medium": { "enum": ["paper", "metal", "usb_drive", "sd_card", "cloud_storage", "memory"] },
+        "product": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["vendor", "model"],
+          "properties": {
+            "vendor": { "type": "string", "description": "Key into MetalBackupCatalog.csv." },
+            "model": { "type": "string", "description": "Key into MetalBackupCatalog.csv." }
+          }
+        },
+        "stored_in": { "$ref": "#/$defs/storedIn" },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/itemSeed" },
+              { "$ref": "#/$defs/itemDescriptor" },
+              { "$ref": "#/$defs/itemPlan" },
+              { "$ref": "#/$defs/itemPassphrase" },
+              { "$ref": "#/$defs/itemPin" }
+            ]
+          }
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "last_verified": { "type": "string", "format": "date" },
+            "interval_days": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    }
+  }
+}
