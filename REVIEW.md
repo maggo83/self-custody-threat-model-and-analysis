@@ -113,8 +113,90 @@ The engine then knows only: entities with attributes and references, containers 
 
 ## 3. Open questions
 
-Collected during the work; see the end of the final report.
+Decisions taken during the work that the owner should confirm or reverse; each is a data switch or a small, local change.
+
+1. **Theft needs the descriptor.** The attacker spends only when he completes the whole spend action, so leaked keys without a
+   known descriptor are `latent`, not theft. The old engine counted the keys alone. If the owner prefers the conservative view
+   ("a descriptor is easy to guess for a default wallet"), point `AccessModel.goals.spend` at an action without the descriptor step.
+2. **Undeclared travel pairs count as 0 minutes.** `quorum_minutes` and the travel measure are only meaningful when every pair of
+   top-level places has a travel time; preflight warns, but a missing pair makes the quorum look instant. Alternative: treat a
+   missing pair as infinite and make the warning an error.
+3. **A stolen signing device leaks its seeds regardless of the PIN** in the impact of `T-DEV-LOST-OR-STOLEN` (`loaded_seeds disclosed`),
+   by catalog design; the PIN is a mechanism that lowers the vulnerability. The access tree could express this instead (controlled
+   device, PIN as a guard) and the impact would become `self controlled`. The result would be sharper but every stolen-device row
+   would change.
+4. **Margin is relative.** `latent_margin` is emitted when a margin probe (one more part lost or leaked) would now cause an outcome
+   that the intact setup would survive. The old engine emitted it for every state whose redundancy was smaller than the policy's
+   threshold, which flagged many setups that never had margin in the first place. Both are defensible; the rule lives in
+   `Ratings.json → outcome_rules`.
+5. **Actors have no capability model.** Sources stay a list with a malicious flag; a burglar and a state-level attacker differ only in
+   per-threat likelihoods. A proper model (what each actor can reach, break or coerce) would make likelihood a derived value.
+6. **The expression language.** It is small (paths, comparisons, quantifiers, `can`) but it is a language, and the derived attributes
+   in `AccessModel.json` are the hardest part of the data to read. The alternative, a few generic Python helpers per concept,
+   was what the old engine did and it put the domain back into code. A schema (`AccessModel.schema.json`) and the loader's
+   `check_catalogs` catch most mistakes; a small "explain this derived attribute" debugging aid would help.
+7. **The redundancy profile produces noise.** With `any`/`k` nodes evaluated exactly, more rows get `latent_*` outcomes than before
+   (a lost backup copy of a 2-of-3 is now visible as degraded redundancy). This is correct but louder; the rules can be tightened.
+8. **Implicit descriptors** of default wallets are not entities; the attacker reconstructs them from all signers' public keys
+   (`R-RECONSTRUCT-DEFAULT-DESCRIPTOR`). Should a known seed of a default wallet also count as a privacy loss of that wallet
+   (it does today) when the wallet has further signers whose keys are unknown? Strictly, the attacker then knows one xpub, not the wallet.
+9. **Rights vs. roles.** `may_spend` is the single source for who may do what; the `owner` role only decides who gets the setup chapter
+   of the manual and whose absence enables a takeover. Should `heir`/`trustee` carry meaning too (e.g. trustees must never be able to
+   spend alone), it should be an `AccessModel.checks` rule.
 
 ## 4. Final report
 
-Written when the work is done.
+### What changed, and why
+
+The engine executes the action catalog instead of reimplementing it. `RecoveryActions.json` already said what spending needs; the
+old `effects.py`/`predicates.py` said it again in Python, with class names everywhere. Now one solver (`access.py`) builds the access
+tree of any action for any agent and returns the least delay; the inductive analysis, the deductive analysis and the manuals all
+read from it. The rest followed from the single-source rule:
+
+- `graph.py` replaces `model.py`: containers, places, reach and derived attributes are generic; derived attributes, selectors,
+  goals, asset and actor definitions, margin probes and setup checks moved to `AccessModel.json` (with a schema).
+- `outcomes.py` replaces the outcome logic of `effects.py`: the evaluator computes facts (spendable, delayed, attacker tier,
+  privacy, margin, profile) and `Ratings.json → outcome_rules` turns them into outcomes.
+- Status flags (`destroyed`, `unavailable`, `disclosed`, `controlled`, `tampered`, `faulty`) are the only state; impacts are
+  selector plus kind; `faulty` was added for mistakes, `controlled` for devices and software the attacker commands.
+- Defaults and per-class rules come from the schema (`default`, `if`/`then` with `x-message`), not from preflight code.
+- Display tables (lane, colour, icon per class) moved from the template to `Texts.json → display`; the template has no class literals,
+  a test enforces it.
+- New: `deductive.py` (minimal cut sets for loss, path sets for theft, with the single threats that realise them; a "Fault trees" tab),
+  `manuals.py` (`--manuals`, one standalone HTML per person), `tests/test_extensibility.py` (a password manager class, action and threat
+  added through data alone; the engine is untouched).
+
+Behaviour changes against the old engine, each pinned by a test: theft requires the full tree incl. descriptor; finer redundancy
+profile (`any`/`k` nodes) gives more `latent_*` rows; margin is relative to the intact setup; privacy loss also through a controlled
+coordinator (unless password-guarded); `T-DESC-INCORRECT`/`T-DESC-DERIVATION-UNKNOWN` only block custom wallets; device threats
+(`T-DEV-BREAKS`, ageing, bricked update, wiped) hit the device only and the seeds follow through the tree; `T-COORD-SOFTWARE-BUG`
+makes the coordinator unavailable; `T-DEV-MALWARE` also tampers the coordinated wallets; `T-BAG-SWAPPED` controls the devices in the
+bag and tampers the rest; software dies with its host.
+
+### What was removed
+
+`model.py` (444 lines), `effects.py` (532) and `predicates.py` (176) are gone, with the per-class `if` chains for impacts, the
+hand-written owner/attacker evaluators, the predicate registry, the hard-coded barrier threat, the preflight rules that the schema
+now expresses, and the JS display tables. The engine is 3 400 lines including the two new modules (deductive and manuals, 430 lines); the old one
+was 2 700. Tests: 247, about four minutes (the fixture is analysed once; the scenarios and the extensibility test
+run the CLI).
+
+### What is still hard-coded
+
+- The facts the outcome rules can use (`outcomes.Evaluator.facts`): adding a new kind of fact is a code change.
+- The rights model: that actors have rights with co-signers, a delay and assets; field names come from `AccessModel.actor`.
+- The travel measure (`strength_from: quorum_travel_minutes`) and the preflight checks for practices, travel pairs and contradicting
+  delays.
+- The five diagram lanes are a layout decision in the template; which class goes to which lane is data.
+- The manuals' chapter structure and which catalog actions are "setup", "send" and "receive" (`Texts.json → manual`).
+
+### Recommended next
+
+1. Decide the open questions 1 to 4 above; each is a one-line data change with a predictable effect on the rows.
+2. The schema-driven setup editor in `--serve` mode: the schema has everything a form generator needs (`x-classes`, `x-ref`, defaults,
+   `if`/`then` messages), and preflight returns the errors with entity ids.
+3. An actor-capability model (question 5), so that likelihoods become derived rather than typed per threat.
+4. Manuals: a printable layout and the diagram of the person's part of the setup (the report's SVG code can be reused once the template
+   is split into data, diagram and page).
+5. Performance: the dummy setup takes ~3 s for the rows and ~14 s in total with the what-if of the measures and the cut sets; the margin
+   probes dominate. Pruning probes by the dependencies of the hit entity would halve it.
