@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "AccessModel.schema.json",
+  "title": "Access model: how the engine reads a setup",
+  "description": "Domain knowledge the engine needs beyond the catalogs: the goals (which actions say what spending needs), the actor and asset classes, the impact selectors, the derived attributes the actions and expressions use, the probes of the margin test, the checks of the preflight and the travel rule.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["goals", "asset", "actor", "selectors", "margin_probes", "derived"],
+  "properties": {
+    "description": { "type": "string" },
+    "goals": {
+      "description": "spend: the action a group of people or the attacker must complete to spend an asset. policy: the same for one spending policy. descriptor: knowing the public configuration of an asset (privacy). know: obtaining a secret.",
+      "type": "object",
+      "required": ["spend", "policy", "descriptor", "know"],
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action"],
+        "properties": {
+          "action": { "$ref": "ThreatModelCommon.schema.json#/$defs/actionId" },
+          "param": { "type": "string" },
+          "params": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "main_when", "policies", "policy_class", "quorum"],
+      "properties": {
+        "class": { "type": "string" },
+        "main_when": { "description": "An asset for which this holds holds the main funds; the others are auxiliary.", "$ref": "ThreatModelCommon.schema.json#/$defs/expression" },
+        "policies": { "description": "Path to the spending policies of an asset.", "type": "string" },
+        "policy_class": { "type": "string" },
+        "quorum": {
+          "description": "For mechanisms with covers: quorum. members: path from a policy to the devices of each signer; threshold: path to the number of signers needed.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["members", "threshold", "member_class", "signer_devices"],
+          "properties": { "members": { "type": "string" }, "threshold": { "type": "string" }, "member_class": { "type": "string" }, "signer_devices": { "type": "string" } }
+        }
+      }
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "rights", "with", "after", "assets", "owner_role"],
+      "properties": {
+        "class": { "type": "string" },
+        "rights": { "description": "Attribute of the actor that lists their access rights.", "type": "string" },
+        "with": { "type": "string" },
+        "after": { "type": "string" },
+        "assets": { "type": "string" },
+        "owner_role": { "type": "string" }
+      }
+    },
+    "travel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "between": { "type": "string" },
+        "no_travel_when": { "$ref": "ThreatModelCommon.schema.json#/$defs/expression" },
+        "immediate_policies_only": { "type": "boolean" }
+      }
+    },
+    "selectors": {
+      "description": "Impact selectors by name. Forms: {self: true}; {placed_in: $path | id, hidden: expression on a place whose contents are not in view from above, visible_from_above: bool, area: bool, where: expression on the selected entities}; {path: p} entities at a path of the target; {peers: [paths], class: C} other entities with the same values.",
+      "type": "object",
+      "additionalProperties": { "type": "object" }
+    },
+    "margin_probes": {
+      "description": "Single further failures (`lose`) and leaks (`leak`) tried on every entity of the class to tell whether a degraded wallet still has a margin.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["class", "lose", "leak"],
+        "properties": {
+          "class": { "type": "string" },
+          "lose": { "type": "array", "items": { "$ref": "Threats.schema.json#/$defs/impact" } },
+          "leak": { "type": "array", "items": { "$ref": "Threats.schema.json#/$defs/impact" } }
+        }
+      }
+    },
+    "checks": {
+      "description": "Preflight checks on every entity of a class; `{path}` in the message is filled with the values of the entity.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["class", "level", "when", "message"],
+        "properties": {
+          "class": { "type": "string" },
+          "level": { "enum": ["error", "warning"] },
+          "when": { "$ref": "ThreatModelCommon.schema.json#/$defs/expression" },
+          "message": { "type": "string" }
+        }
+      }
+    },
+    "derived": {
+      "description": "Derived attributes, keyed `Class.attribute`, inherited by subclasses. Forms: {path: p, as, class, where, single}; {select: Class, as: $e, each: path, item: $i, where, yield, class, single}; {union: [defs]}; {containers: Class}; {roots_of: path}; {reach: true}; {dependents: Class, as, where}; {dependencies: true}; {inside: Class}; {value: v}.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z]+\\.[a-z_]+$" },
+      "additionalProperties": { "type": "object" }
+    }
+  }
+}

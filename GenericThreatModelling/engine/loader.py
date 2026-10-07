@@ -12,8 +12,8 @@ import ontology
 import vocab
 
 ENGINE = Path(__file__).resolve().parent
-DATA = ENGINE.parent                 # catalogs, ratings, schemas
-ONTOLOGY = DATA.parent               # setup schema and ontology
+ONTOLOGY = ontology.ROOT               # setup schema and ontology (CUSTODY_DATA_ROOT or the repository)
+DATA = ONTOLOGY / "GenericThreatModelling"   # catalogs, ratings, schemas
 LOOKUPS = ONTOLOGY / "Lookups"
 
 CATALOG_FILES = {
@@ -22,6 +22,7 @@ CATALOG_FILES = {
     "actions": ("RecoveryActions.json", "RecoveryActions.schema.json"),
     "ratings": ("Ratings.json", "Ratings.schema.json"),
     "common_cause": ("CommonCause.json", "CommonCause.schema.json"),
+    "access": ("AccessModel.json", "AccessModel.schema.json"),
 }
 SETUP_SCHEMA = "SetupOntology.schema.json"
 
@@ -50,14 +51,30 @@ def schema_store():
 
 
 def validate(instance, schema_name):
-    """Errors of `instance` against a schema file name; schemas may reference each other."""
+    """Errors of `instance` against a schema file name; schemas may reference each other. A failed rule whose schema
+    (or an enclosing `then`) carries an `x-message` reports that message instead of the generic one."""
     store = schema_store()
     schema = store[schema_name]
     validator = Draft202012Validator(schema, resolver=RefResolver.from_schema(schema, store=store))
     errors = []
     for e in sorted(validator.iter_errors(instance), key=lambda e: [str(x) for x in e.absolute_path]):
-        errors.append("/".join(str(x) for x in e.absolute_path) + ": " + e.message[:200])
+        errors.append("/".join(str(x) for x in e.absolute_path) + ": " + (_message(schema, e.absolute_schema_path) or e.message[:200]))
     return errors
+
+
+def _message(schema, path):
+    """The deepest `x-message` on the schema path of an error."""
+    node, found = schema, None
+    for key in path:
+        if isinstance(node, dict) and "$ref" in node and key not in node:
+            node = schema["$defs"][node["$ref"].rsplit("/", 1)[1]]
+        try:
+            node = node[key]
+        except (KeyError, IndexError, TypeError):
+            return found
+        if isinstance(node, dict) and "x-message" in node:
+            found = node["x-message"]
+    return found
 
 
 def csv_rows(path, key_columns):
@@ -69,32 +86,53 @@ def csv_rows(path, key_columns):
 
 
 class Catalogs:
-    """All static data: threat, mechanism and action catalogs, rating tables, lookup tables."""
+    """All static data: threat, mechanism and action catalogs, rating tables, the access model, lookup tables."""
 
-    def __init__(self):
-        self.raw = {name: read_json(DATA / f) for name, (f, _) in CATALOG_FILES.items()}
+    def __init__(self, data_dir=None, lookups_dir=None):
+        self.data_dir, self.lookups_dir = Path(data_dir or DATA), Path(lookups_dir or LOOKUPS)
+        self.raw = {name: read_json(self.data_dir / f) for name, (f, _) in CATALOG_FILES.items()}
         self.threats = {t["id"]: t for t in self.raw["threats"]["threats"]}
         self.mechanisms = {m["id"]: m for m in self.raw["mechanisms"]["mechanisms"]}
         self.actions = {a["id"]: a for a in self.raw["actions"]["actions"]}
         self.ratings = self.raw["ratings"]
+        self.access = self.raw["access"]
         self.category_likelihood = self.raw["threats"]["category_likelihood"]
         self.common_cause = self.raw["common_cause"]["groups"]
-        self.device_rows = csv_rows(LOOKUPS / "SigningDeviceCatalog.csv", ("vendor", "model"))
-        self.metal_rows = csv_rows(LOOKUPS / "MetalBackupCatalog.csv", ("vendor", "model"))
-        self.location_rows = csv_rows(LOOKUPS / "LocationKinds.csv", ("kind",))
+        self._lookups = {}
         self.responded = {t for a in self.actions.values() for t in a.get("responds_to", [])}
 
+    def lookup(self, table):
+        """Rows of a lookup table by key, the key columns being those the ontology declares for the class."""
+        if table not in self._lookups:
+            spec = next(c["catalog"] for c in ontology.TABLE.values() if c.get("catalog", {}).get("table") == table)
+            columns = tuple(k.rsplit(".", 1)[-1] for k in spec["key"])
+            self._lookups[table] = csv_rows(self.lookups_dir / table, columns)
+        return self._lookups[table]
+
+    @property
+    def device_rows(self):
+        return self.lookup("SigningDeviceCatalog.csv")
+
+    @property
+    def metal_rows(self):
+        return self.lookup("MetalBackupCatalog.csv")
+
+    @property
+    def location_rows(self):
+        return self.lookup("LocationKinds.csv")
+
     def hashes(self):
-        h = {name: sha(DATA / f) for name, (f, _) in CATALOG_FILES.items()}
-        for name, f in (("device_catalog", "SigningDeviceCatalog.csv"), ("metal_catalog", "MetalBackupCatalog.csv"), ("location_kinds", "LocationKinds.csv")):
-            h[name] = sha(LOOKUPS / f)
+        h = {name: sha(self.data_dir / f) for name, (f, _) in CATALOG_FILES.items()}
+        for c in ontology.TABLE.values():
+            if "catalog" in c:
+                h[c["catalog"]["table"]] = sha(self.lookups_dir / c["catalog"]["table"])
         return h
 
     def has_response(self, threat_id):
         return threat_id in self.responded
 
 
-def check_catalogs(cat, predicate_names):
+def check_catalogs(cat):
     """Schema and cross-reference errors of the static data (empty list = fine)."""
     errors = []
     for name, (_, schema) in CATALOG_FILES.items():
@@ -108,9 +146,6 @@ def check_catalogs(cat, predicate_names):
                 errors.append(f"mechanism {m['id']}: unknown action {p}")
         if m.get("refines") and cat.mechanisms.get(m["refines"], {}).get("form") != "principle":
             errors.append(f"mechanism {m['id']}: refines {m['refines']}, which is not a principle")
-        pred = m.get("predicate", {}).get("name")
-        if pred and pred not in predicate_names:
-            errors.append(f"mechanism {m['id']}: predicate {pred} is not implemented")
     for a in cat.actions.values():
         for t in a.get("responds_to", []):
             if t not in cat.threats:
@@ -119,9 +154,15 @@ def check_catalogs(cat, predicate_names):
             if s["action"] not in cat.actions:
                 errors.append(f"action {a['id']}: unknown step {s['action']}")
     for t in cat.threats.values():
-        pred = t.get("predicate", {}).get("name")
-        if pred and pred not in predicate_names:
-            errors.append(f"threat {t['id']}: predicate {pred} is not implemented")
+        for impact in t["impacts"]:
+            if impact["on"] not in cat.access["selectors"]:
+                errors.append(f"threat {t['id']}: unknown impact selector {impact['on']}")
+    for g in cat.access["goals"].values():
+        if g["action"] not in cat.actions:
+            errors.append(f"access model: goal names the unknown action {g['action']}")
+    for key in cat.access["derived"]:
+        if key.split(".")[0] not in ontology.CLASSES:
+            errors.append(f"access model: derived attribute {key} names an unknown class")
     errors += check_classes(cat)
     errors += check_location_kinds(cat)
     errors += [f"threats: no default likelihood for the category {c}" for c in vocab.CATEGORIES if c not in cat.category_likelihood]
@@ -133,9 +174,9 @@ def check_catalogs(cat, predicate_names):
 
 
 def check_location_kinds(cat):
-    """The kinds a plan may use and the rows of the lookup table must be the same, apart from the kinds the tool makes itself."""
+    """The kinds a plan may use and the rows of the lookup table must be the same."""
     allowed = set(ontology.SCHEMA["$defs"]["location"]["properties"]["kind"]["enum"])
-    rows = {k for (k,), row in cat.location_rows.items() if row["origin"] == "plan"}
+    rows = {k for (k,) in cat.location_rows}
     return [f"location kinds: {k} is in only one of the setup schema and LocationKinds.csv" for k in sorted(allowed ^ rows)]
 
 
@@ -186,8 +227,16 @@ def references(data):
             yield from walk(item, node["items"], f"{label.get(coll, coll.replace('_', ' '))} {item.get('id', '')}".strip())
 
 
+def message(S, eid, text):
+    """Fill `{path}` placeholders of a check message with the values of the entity."""
+    def fill(m):
+        vals = S.values(eid, m.group(1))
+        return ", ".join(str(v) for v in vals) if vals else "?"
+    return re.sub(r"\{([a-zA-Z_][a-zA-Z0-9_.\[\]]*)\}", fill, text)
+
+
 def preflight(data, cat):
-    """Schema validation and referential checks of a setup. Returns (errors, warnings)."""
+    """Schema validation, referential checks and the checks of the access model. Returns (errors, warnings)."""
     errors = [f"schema: {e}" for e in validate(data, SETUP_SCHEMA)]
     warnings = []
     if errors:
@@ -199,76 +248,42 @@ def preflight(data, cat):
             if e["id"] in cls:
                 errors.append(f"duplicate id {e['id']}")
             cls[e["id"]] = c
-
     for where, ref, expected in references(data):
         if ref not in cls:
             errors.append(f"{where}: unknown id {ref}")
         elif not ontology.is_a(cls[ref], expected):
             errors.append(f"{where}: {ref} is a {cls[ref]}, expected {expected}")
+    if errors:
+        return errors, warnings
 
-    for loc in data.get("locations", []):
-        if "access" not in loc:
-            warnings.append(f"location {loc['id']}: no access list; nobody can reach it")
-    for d in data.get("devices", []):
-        w = f"device {d['id']}"
-        if (d["vendor"], d["model"]) not in cat.device_rows:
-            warnings.append(f"{w}: {d['vendor']} / {d['model']} is not in the device catalog")
-    for d in data.get("computing_devices", []):
-        w = f"computing device {d['id']}"
-        if d["kind"] == "mobile" and "person" not in d["stored_in"]:
-            errors.append(f"{w}: a mobile device is carried by a person; use stored_in person")
-        if d["kind"] == "desktop" and "person" in d["stored_in"]:
-            errors.append(f"{w}: a desktop computer stands in a location, it is not carried")
-    for w in data["wallets"]:
-        for p in w["spending_policies"]:
-            if p["threshold"] > len(p["signers"]):
-                errors.append(f"wallet {w['id']}: threshold {p['threshold']} exceeds {len(p['signers'])} signers")
-    held = {b_item["subject"]["descriptor"] for b in data.get("backups", []) for b_item in b["items"] if "descriptor" in b_item["subject"]}
-    held |= {x for coll in ("devices", "computing_devices", "coordinators") for d in data.get(coll, []) for x in d.get("stores_descriptors", [])}
-    descriptors_of = {}
-    for d in data.get("descriptors", []):
-        descriptors_of.setdefault(d["wallet"], []).append(d["id"])
-        if d["id"] not in held:
-            errors.append(f"descriptor {d['id']}: kept nowhere; it needs a backup copy, a registration on a device or a coordinator that has it")
-    for w in data["wallets"]:
-        signers = {(sg["seed"], sg.get("passphrase")) for pol in w["spending_policies"] for sg in pol["signers"]}
-        mine = descriptors_of.get(w["id"], [])
-        if len(mine) > 1:
-            errors.append(f"wallet {w['id']} has {len(mine)} descriptors; a wallet has at most one")
-        if (w.get("definition") == "custom" or len(signers) > 1) and not mine:
-            errors.append(f"wallet {w['id']} has several signers or a custom definition and needs a descriptor")
-    for b in data.get("backups", []):
-        where = f"backup {b['id']}"
-        if b["medium"] == "memory" and "person" not in b["stored_in"]:
-            errors.append(f"{where}: a memory backup is in a person's mind; use stored_in person")
-        if "product" in b and (b["product"]["vendor"], b["product"]["model"]) not in cat.metal_rows:
-            warnings.append(f"{where}: product {b['product']['vendor']} / {b['product']['model']} is not in the backup catalog")
-    # access rights
-    mains = [w["id"] for w in data["wallets"] if not w.get("tripwire", {}).get("enabled")]
+    from graph import Setup
+    S = Setup(data, cat)
+    # containment cycles
+    for eid in S.by_id:
+        chain, cur = [], S.container(eid)
+        while cur and cur not in chain:
+            chain.append(cur)
+            cur = S.container(cur)
+        if cur:
+            errors.append(f"containment cycle at {eid}")
+    if errors:
+        return errors, warnings
+    # the declared checks
+    for check in cat.access.get("checks", []):
+        for eid in S.ids_of(check["class"]):
+            if S.holds(eid, check["when"]):
+                (errors if check["level"] == "error" else warnings).append(message(S, eid, check["message"]))
+    # access rights that contradict each other
+    a = cat.access["actor"]
     declared = {}
-    for p in data.get("people", []):
-        where = f"person {p['id']} may_spend"
-        for e in p.get("may_spend", []):
-            if p["id"] in e.get("with", []):
-                errors.append(f"{where}: the person is listed in their own `with`")
-            for w in e.get("wallets", mains):
-                declared.setdefault((frozenset([p["id"], *e.get("with", [])]), w), set()).add(e.get("after_blocks", 0))
+    mains = [w for w in S.ids_of(cat.access["asset"]["class"]) if S.holds(w, cat.access["asset"]["main_when"])]
+    for p in S.of(a["class"]):
+        for e in p.get(a["rights"], []):
+            for w in e.get(a["assets"], mains):
+                declared.setdefault((frozenset([p["id"], *e.get(a["with"], [])]), w), set()).add(e.get(a["after"], 0))
     for (people, w), delays in declared.items():
         if len(delays) > 1:
-            errors.append(f"may_spend: {' and '.join(sorted(people))} are given different delays for {w}: {sorted(delays)}")
-    for w in mains:
-        if not any(k[1] == w for k in declared):
-            errors.append(f"wallet {w}: nobody may spend it; give a person a `may_spend` entry")
-    # bag cycles
-    bag_in = {b["id"]: b["stored_in"].get("bag") for b in data.get("bags", [])}
-    for start in bag_in:
-        seen, cur = set(), start
-        while cur:
-            if cur in seen:
-                errors.append(f"bag cycle at {start}")
-                break
-            seen.add(cur)
-            cur = bag_in.get(cur)
+            errors.append(f"{a['rights']}: {' and '.join(sorted(people))} are given different delays for {w}: {sorted(delays)}")
     # practices
     for p in data.get("practices", []):
         where = f"practice {p['id']}"
@@ -279,52 +294,16 @@ def preflight(data, cat):
         if m["form"] != "procedural":
             errors.append(f"{where}: {p['mechanism']} is not a procedural mechanism")
             continue
-        allowed = ontology.SUBCLASSES.get(m["target"], (m["target"],))
         for ref in p.get("scope", []):
-            if ref not in cls and ref != "@plan":
+            if ref not in S.by_id:
                 errors.append(f"{where}: unknown id {ref}")
-            elif ref in cls and cls[ref] not in allowed:
-                errors.append(f"{where}: {ref} is a {cls[ref]}, but {p['mechanism']} targets {m['target']}")
-    # secrets without any copy
-    held = set()
-    for b in data.get("backups", []):
-        for item in b["items"]:
-            held.update(v for k, v in item["subject"].items() if k != "plan")
-    for coll in ("seeds", "passphrases", "pins"):
-        for s in data.get(coll, []):
-            if s["id"] not in held:
-                warnings.append(f"{coll[:-1]} {s['id']} has no backup copy")
-    if not errors:
-        import predicates
-        from model import Setup
-        S = Setup(data, cat)
-        for w in S.ids_of("Wallet"):
-            if not S.coordinators_of(w):
-                warnings.append(f"wallet {w}: no coordinator has its descriptor, so nobody can build transactions for it; list the descriptor in `stores_descriptors` of a coordinator")
-        for c in S.of("Coordinator"):
-            if not S.ent(c["runs_on"])["online"]:
-                warnings.append(f"coordinator {c['id']} runs on {c['runs_on']}, which is offline; a coordinator queries the network")
-        for d in S.of("SigningDevice"):
-            support, stored = S.registration_support(d["id"]), d.get("stores_descriptors", [])
-            name, wallets = f"device {d['id']} ({d['vendor']} {d['model']})", S.registration_wallets(d["id"])
-            if stored and support in ("none", "per_transaction"):
-                errors.append(f"{name} cannot keep a registered descriptor (catalog: {support})")
-            elif wallets and support == "unknown":
-                warnings.append(f"{name} signs for {', '.join(wallets)}; the catalog does not say whether it registers descriptors, so it counts as not registering")
-            elif wallets and support == "per_transaction":
-                loads = any(p["mechanism"] == "M-P-LOAD-DESCRIPTOR" and (not p.get("scope") or d["id"] in p["scope"])
-                            for p in data.get("practices", []))
-                if not (loads and predicates.REGISTRY["descriptor_at_device_location"](S, d["id"])):
-                    warnings.append(f"{name} signs for {', '.join(wallets)} and needs the descriptor loaded for every signing instead of a registered one; it counts as not checking the policy unless the descriptor is kept where the device is and a practice M-P-LOAD-DESCRIPTOR covers it")
-            elif wallets and support != "registers":
-                warnings.append(f"{name} signs for {', '.join(wallets)} but does not keep a registered descriptor (catalog: {support}); it cannot check the wallet policy before signing")
-            else:
-                missing = [w for w in wallets if S.ent(w).get("descriptor") not in stored]
-                if missing:
-                    warnings.append(f"{name} supports registering descriptors but has none registered for {', '.join(missing)}")
-        places = [l["id"] for l in S.of("Location") if not l.get("part_of") and l["kind"] not in ("cloud", "person")]
-        declared = {frozenset((S.root(t["from"]), S.root(t["to"]))) for t in data.get("travel_times", [])}
-        absent = [f"{a} and {b}" for a, b in combinations(places, 2) if frozenset((a, b)) not in declared]
-        if absent:
-            warnings.append("no travel time between " + "; ".join(absent[:4]) + (f" and {len(absent) - 4} more pairs" if len(absent) > 4 else "") + "; they count as 0 minutes")
+            elif not ontology.is_a(S.cls(ref), m["target"]):
+                errors.append(f"{where}: {ref} is a {S.cls(ref)}, but {p['mechanism']} targets {m['target']}")
+    # travel times
+    spec = cat.access.get("travel", {})
+    places = [l for l in S.places if ontology.is_a(S.cls(l), spec.get("between", "Location")) and not S.container(l) and not S.no_travel(l)]
+    declared = {frozenset((S.root(t["from"]), S.root(t["to"]))) for t in data.get("travel_times", [])}
+    absent = [f"{a} and {b}" for a, b in combinations(sorted(places), 2) if frozenset((a, b)) not in declared]
+    if absent:
+        warnings.append("no travel time between " + "; ".join(absent[:4]) + (f" and {len(absent) - 4} more pairs" if len(absent) > 4 else "") + "; they count as 0 minutes")
     return errors, warnings

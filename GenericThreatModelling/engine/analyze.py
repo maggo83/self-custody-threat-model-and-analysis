@@ -5,17 +5,17 @@ import itertools
 import json
 import sys
 
-import effects
+import access
+import deductive
 import loader
 import measures
-import predicates
+import outcomes as outc
 import rating
 import feedback as fbk
-from vocab import MALICIOUS_SOURCES
 from feedback import FIELDS
-from model import Setup
+from graph import Setup
 
-TOOL_VERSION = "0.1"
+TOOL_VERSION = "0.2"
 
 
 def instances(S, cat):
@@ -24,7 +24,7 @@ def instances(S, cat):
     for tid, t in cat.threats.items():
         cls = t["target"]["class"]
         classes = t["target"].get("subclasses") or [cls]
-        ents = [e["id"] for c in classes for e in S.of(c)]
+        ents = [e for c in classes for e in S.ids_of(c)]
         if t["target"].get("cardinality") == "set":
             n = t["target"].get("min_size", 2)
             combos = list(itertools.combinations(ents, n))
@@ -32,13 +32,9 @@ def instances(S, cat):
             combos = [(e,) for e in ents]
         for combo in combos:
             e = combo[0]
-            if len(combo) == 1:
-                if t.get("applies_when") and not S.holds(e, t["applies_when"]):
-                    skipped.append({"threat": tid, "entity": e, "reason": "applies_when"})
-                    continue
-                if t.get("predicate") and not predicates.holds(S, t["predicate"], e):
-                    skipped.append({"threat": tid, "entity": e, "reason": "predicate:" + t["predicate"]["name"]})
-                    continue
+            if len(combo) == 1 and t.get("applies_when") is not None and not S.holds(e, t["applies_when"]):
+                skipped.append({"threat": tid, "entity": e, "reason": "applies_when"})
+                continue
             rows.append((t, combo))
     return rows, skipped
 
@@ -65,9 +61,9 @@ def unique(outcomes):
     return out
 
 
-def exploit_of(outcomes):
-    kinds = {o["exploit"] for o in outcomes if o["outcome"] in ("main_loss", "aux_loss")}
-    for k in ("immediate", "at_use", "after_delay", "at_recovery"):
+def exploit_of(cat, outcomes):
+    kinds = {o["exploit"] for o in outcomes if o["outcome"] in cat.ratings["outcome_by_asset"]["loss"]}
+    for k in cat.ratings["protection"]["exploits"]["order"]:
         if k in kinds:
             return k
     return "none"
@@ -78,29 +74,32 @@ def worst_vulnerability(S, cat, tid, insts, combo, st, outcomes, sev, barrier=()
     table = cat.ratings["outcomes"]
     worst = [o for o in outcomes if sev["value"] > 0 and table[o["outcome"]]["severity"] == sev["value"]]
     best = None
-    known = effects.attacker_secrets(S, st)
     for w in sorted({o["wallet"] for o in worst}):
         os = [o for o in worst if o["wallet"] == w]
-        V = rating.vulnerability(S, cat, tid, insts, rating.footprint(S, combo, st, os), exploit_of(os), w, known, barrier)
+        V = rating.vulnerability(S, cat, tid, insts, rating.footprint(S, combo, st, os), exploit_of(cat, os), w, st, barrier)
         V["wallet"] = w
         if best is None or V["value"] > best["value"]:
             best = V
-    return best or rating.vulnerability(S, cat, tid, insts, rating.footprint(S, combo, st, []), "none", None, known, barrier)
+    return best or rating.vulnerability(S, cat, tid, insts, rating.footprint(S, combo, st, []), "none", None, st, barrier)
+
+
+def barriers(index):
+    return [i for insts in index.values() for i in insts if i.get("barrier_for")]
 
 
 def rerate(S, cat, item, index):
     """(vulnerability, risk) of a row that was analysed before, with another set of mechanism instances."""
     tid, combo, st, outcomes, sev, L, v_set, s_value = item
-    V = worst_vulnerability(S, cat, tid, index.get(tid, []), combo, st, outcomes, sev, index.get("T-WALLET-TIMELOCK-LAPSE", []))
+    V = worst_vulnerability(S, cat, tid, index.get(tid, []), combo, st, outcomes, sev, barriers(index))
     v = V["value"] if v_set is None else v_set
     return v, rating.risk(cat, L["value"], v, s_value)[1]
 
 
-def analyze(setup_path, progress=None, check_only=False, what_if=True, given=None):
-    """`given`: the overrides of the owners (see feedback.py)."""
-    cat = loader.Catalogs()
+def analyze(setup_path, progress=None, check_only=False, what_if=True, given=None, cat=None):
+    """`given`: the overrides of the owners (see feedback.py). `cat`: catalogs other than the standard ones."""
+    cat = cat or loader.Catalogs()
     data = loader.read_json(setup_path)
-    errors = loader.check_catalogs(cat, set(predicates.REGISTRY))
+    errors = loader.check_catalogs(cat)
     perrors, warnings = loader.preflight(data, cat)
     errors += [f"setup {e}" for e in perrors]
     given = given or fbk.empty()
@@ -110,12 +109,13 @@ def analyze(setup_path, progress=None, check_only=False, what_if=True, given=Non
     if check_only:
         return {"errors": [], "warnings": warnings}
     S = Setup(data, cat)
-    ev = effects.Evaluator(S)
+    ev = outc.Evaluator(S)
     for w, t in ev.base_tier.items():
         if t != 0:
             warnings.append(f"baseline: wallet {w} cannot be used even without any threat (tier {t})")
     warnings.extend(ev.baseline)
     mechs = rating.mechanism_instances(S, cat)
+    barrier = barriers(mechs)
 
     pairs, skipped = instances(S, cat)
     answers, scopes = fbk.by_ask(given), fbk.by_scope(given)
@@ -123,18 +123,18 @@ def analyze(setup_path, progress=None, check_only=False, what_if=True, given=Non
     for n, (t, combo) in enumerate(pairs):
         tid = t["id"]
         peers = common_cause_peers(S, cat, tid, combo[0]) if len(combo) == 1 else []
-        st = effects.State()
-        malicious = bool(set(t["source"]) & MALICIOUS_SOURCES)
+        st = access.State()
         for target in list(combo) + peers:
             for impact in t["impacts"]:
-                effects.apply_impact(S, st, target, impact, malicious)
+                access.apply_impact(S, st, target, impact)
         if t.get("target_acts"):
             st.actors |= set(combo)
-        access = ev.access(st)
-        outcomes = unique(ev.evaluate(st, access))
+        acc = ev.access(st)
+        known = access.attacker_secrets(S, st)
+        outcomes = unique(ev.evaluate(st, acc, known))
         sev = rating.severity(cat, outcomes)
         L = rating.likelihood(S, cat, t, combo[0], answers) if len(combo) == 1 else rating.likelihood(S, cat, t, "", answers)
-        V = worst_vulnerability(S, cat, tid, mechs.get(tid, []), combo, st, outcomes, sev, mechs.get("T-WALLET-TIMELOCK-LAPSE", []))
+        V = worst_vulnerability(S, cat, tid, mechs.get(tid, []), combo, st, outcomes, sev, barrier)
         sev_computed, rid = sev, tid + "@" + "+".join(combo)
         ov = {k: o for k in FIELDS if (o := fbk.pick(scopes, rid, tid, combo, k))}
         L, V, sev = [fbk.override(x, ov[k]) if k in ov else x for k, x in (("L", L), ("V", V), ("S", sev))]
@@ -153,14 +153,14 @@ def analyze(setup_path, progress=None, check_only=False, what_if=True, given=Non
         if peers:
             row["common_cause"] = peers
         affected = st.summary()
-        known = sorted(k for k in effects.attacker_secrets(S, st) if k in S.by_id)
+        known = sorted(known)
         if known:
-            affected["secret_known"] = known        # all the attacker gets, not only what leaked directly
+            affected["known"] = known        # all the attacker gets, not only what leaked directly
         if affected:
             row["effects"] = affected
         row["outcomes"] = outcomes
-        if any(a["result"] != "ok" for a in access):
-            row["access"] = [a for a in access if a["result"] != "ok"]
+        if any(a["result"] != "ok" for a in acc):
+            row["access"] = [a for a in acc if a["result"] != "ok"]
         row.update({"L": L, "V": V, "S": sev, "RL": rl, "R": risk})
         if needs:
             row["needs_input"] = needs
@@ -170,6 +170,7 @@ def analyze(setup_path, progress=None, check_only=False, what_if=True, given=Non
             progress(n, len(pairs))
     measure_list = measures.measures(S, cat, kept, lambda item, index: rerate(S, cat, item, index)) if what_if else []
     rows.sort(key=lambda r: (S.cls(r["entity"][0] if isinstance(r["entity"], list) else r["entity"]), str(r["entity"]), r["threat"]))
+    cut_sets = deductive.deductive(S, ev, rows) if what_if else []
     sha = loader.sha(setup_path)
     warnings.extend(fbk.stale(given, rows, set(asks), sha))
     return {
@@ -189,6 +190,7 @@ def analyze(setup_path, progress=None, check_only=False, what_if=True, given=Non
         "rows": rows,
         "not_applicable": skipped,
         "measures": measure_list,
+        "deductive": cut_sets,
     }
 
 
@@ -214,6 +216,9 @@ def write_raw(result, path):
     lines.append("  ],")
     lines.append('  "measures": [')
     lines.append(",\n".join("    " + ser(r) for r in result["measures"]))
+    lines.append("  ],")
+    lines.append('  "deductive": [')
+    lines.append(",\n".join("    " + ser(r) for r in result.get("deductive", [])))
     lines.append("  ]")
     lines.append("}")
     with open(path, "w", encoding="utf-8") as f:

@@ -44,6 +44,35 @@
     "aux_loss": { "severity": 3, "description": "Auxiliary (tripwire) funds are lost or stolen." },
     "main_loss": { "severity": 4, "description": "Main funds are lost or stolen." }
   },
+  "outcome_by_asset": {
+    "description": "Outcome names a rule may use instead of a fixed one: [outcome for a main wallet, outcome for an auxiliary wallet].",
+    "loss": ["main_loss", "aux_loss"],
+    "lockout": ["lockout_temporary", "inconvenience"]
+  },
+  "outcome_rules": {
+    "description": "Which outcome follows from the facts the engine establishes for a wallet after a threat (see engine/outcomes.py for the facts). Every rule whose `when` holds adds its outcome; `unless_emitted` skips a rule when one of the listed outcomes was already added for the wallet by an earlier rule. `exploit` says when an attacker can act: a fixed kind, or the fact that holds it.",
+    "rules": [
+      { "outcome": "loss", "when": { "all": ["stolen", "theft_immediate"] }, "detail": "attacker holds enough signers", "exploit": "immediate" },
+      { "outcome": "loss", "when": { "all": ["stolen", "theft_after_delay"] }, "detail": "attacker holds enough signers, but only for a policy that opens after its delay", "exploit": "after_delay" },
+      { "outcome": "loss", "when": { "all": ["wallet_tampered", { "not": "stolen" }] }, "detail": "transaction or wallet manipulated", "exploit": "at_use" },
+      { "outcome": "loss", "when": { "all": ["wallet_faulty", { "not": "stolen" }, { "not": "wallet_tampered" }] }, "detail": "wallet set up wrongly", "exploit": "at_recovery" },
+      { "outcome": "loss", "when": { "all": ["dependency_tampered", { "not": "stolen" }, { "not": "wallet_tampered" }, { "not": "wallet_faulty" }] }, "detail": "tampered backup used at recovery", "exploit": "at_recovery" },
+      { "outcome": "loss", "when": { "all": ["main_with_rightholders", "all_lost"] }, "detail": "nobody who may spend it can reach it any more" },
+      { "outcome": "loss", "when": { "all": ["main_with_rightholders", { "not": "all_lost" }, "all_owners_lost"] }, "detail": "every owner has lost all access" },
+      { "outcome": "owner_access_lost", "when": { "all": ["main_with_rightholders", { "not": "all_lost" }, { "not": "all_owners_lost" }, "some_owner_lost"] }, "detail": "an owner has lost every way to the funds while another owner keeps one" },
+      { "outcome": "lockout_temporary", "when": { "all": ["main_with_rightholders", { "not": "all_lost" }, { "not": "all_owners_lost" }, "owner_delayed"] }, "detail": "access only later than intended, or after a repair" },
+      { "outcome": "latent_margin", "when": { "all": ["main_with_rightholders", { "not": "all_lost" }, { "not": "all_owners_lost" }, "other_delayed"] }, "detail": "access only later than intended, or after a repair" },
+      { "outcome": "latent_no_margin", "when": { "all": ["main_with_rightholders", { "not": "all_lost" }, { "not": "all_owners_lost" }, "other_lost"] }, "detail": "a person who may spend it has lost every way to it" },
+      { "outcome": "loss", "when": { "all": [{ "not": "main_with_rightholders" }, { "not": "nobody_left" }, "unusable"] }, "detail": "no usable policy remains" },
+      { "outcome": "lockout", "when": { "all": [{ "not": "main_with_rightholders" }, { "not": "nobody_left" }, "usable_later"] }, "detail": "usable only after a delay, repair or reconstruction" },
+      { "outcome": "lockout", "when": "wallet_unavailable", "detail": "wallet blocked by the threat" },
+      { "outcome": "privacy_loss", "when": "privacy", "detail": "holdings or structure become known" },
+      { "outcome": "inconvenience", "when": "deps_affected", "detail": "a part must be repaired or replaced" },
+      { "outcome": "latent_no_margin", "when": "plan_impaired", "detail": "plan unusable for recovery" },
+      { "outcome": "latent_margin", "when": { "all": [{ "not": "nobody_left" }, "degraded", "margin"] }, "unless_emitted": ["main_loss", "aux_loss", "lockout_temporary", "owner_access_lost"], "detail": "fewer independent parts remain" },
+      { "outcome": "latent_no_margin", "when": { "all": [{ "not": "nobody_left" }, "degraded", { "not": "margin" }] }, "unless_emitted": ["main_loss", "aux_loss", "lockout_temporary", "owner_access_lost"], "detail": "one further failure is critical" }
+    ]
+  },
   "protection": {
     "description": "Vulnerability = 4 - protection. Protection comes from the strongest mechanism that is present in the setup; a prevention and a detection together add a bonus.",
     "prevention": { "eliminates": 4, "reduces": 1 },
@@ -55,7 +84,8 @@
       "setup_check": { "description": "A check done at setup finds every fault that was made at or before setup almost surely: a restore test shows a wrong backup, a test transaction a wrong policy.", "phases": ["setup", "generation"], "value": 3 },
       "fast_enough": { "immediate": ["continuous"], "at_use": ["continuous", "before_each_use"], "at_recovery": "any", "after_delay": "any", "none": "any" }
     },
-    "after_delay": { "description": "Protection against an attacker who can spend only after the delay of a policy has passed: a mechanism that keeps the funds from ever reaching that delay (refreshing them in time) counts with these values; detections count with any schedule, there is time to react.", "reduces": 2, "eliminates": 4 },
+    "after_delay": { "description": "Protection against an attacker who can spend only after the delay of a policy has passed: a mechanism with `barrier_for: after_delay` that is present on the wallet counts with these values; detections count with any schedule, there is time to react.", "reduces": 2, "eliminates": 4 },
+    "exploits": { "description": "When an attacker can act, most urgent first; the exploit of a row is the most urgent one among its loss outcomes.", "order": ["immediate", "at_use", "after_delay", "at_recovery", "none"] },
     "travel_minutes": [{ "at_least": 15, "value": 1 }, { "at_least": 30, "value": 2 }, { "at_least": 120, "value": 3 }],
     "bonus_prevention_and_detection": 1,
     "max": 4

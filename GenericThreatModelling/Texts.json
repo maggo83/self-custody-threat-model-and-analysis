@@ -1,22 +1,70 @@
 {
   "status": "draft, to be curated; texts of the report. {name} are placeholders filled by the report generator",
   "classes": {
-    "Person": ["Person", "People"],
-    "Location": ["Location", "Locations"],
-    "TamperEvidentBag": ["Tamper-evident bag", "Tamper-evident bags"],
-    "BagStrip": ["Bag strip", "Bag strips"],
-    "SigningDevice": ["Signing device", "Signing devices"],
-    "ComputingDevice": ["Computing device", "Computing devices"],
-    "Backup": ["Backup", "Backups"],
-    "Seed": ["Seed", "Seeds"],
-    "Passphrase": ["Passphrase", "Passphrases"],
-    "PinPassword": ["PIN or password", "PINs and passwords"],
-    "Descriptor": ["Descriptor", "Descriptors"],
-    "Wallet": ["Wallet", "Wallets"],
-    "Coordinator": ["Coordinator", "Coordinators"],
-    "Plan": ["Plan", "Plan"]
+    "Person": [
+      "Person",
+      "People"
+    ],
+    "Location": [
+      "Location",
+      "Locations"
+    ],
+    "TamperEvidentBag": [
+      "Tamper-evident bag",
+      "Tamper-evident bags"
+    ],
+    "BagStrip": [
+      "Bag strip",
+      "Bag strips"
+    ],
+    "SigningDevice": [
+      "Signing device",
+      "Signing devices"
+    ],
+    "ComputingDevice": [
+      "Computing device",
+      "Computing devices"
+    ],
+    "Backup": [
+      "Backup",
+      "Backups"
+    ],
+    "Seed": [
+      "Seed",
+      "Seeds"
+    ],
+    "Passphrase": [
+      "Passphrase",
+      "Passphrases"
+    ],
+    "PinPassword": [
+      "PIN or password",
+      "PINs and passwords"
+    ],
+    "Descriptor": [
+      "Descriptor",
+      "Descriptors"
+    ],
+    "Wallet": [
+      "Wallet",
+      "Wallets"
+    ],
+    "Coordinator": [
+      "Coordinator",
+      "Coordinators"
+    ],
+    "Plan": [
+      "Plan",
+      "Plan"
+    ]
   },
-  "risk_labels": ["negligible", "low", "medium", "high", "critical"],
+  "risk_labels": [
+    "negligible",
+    "low",
+    "medium",
+    "high",
+    "critical"
+  ],
   "outcomes": {
     "none": "No effect",
     "inconvenience": "Inconvenience",
@@ -36,24 +84,21 @@
     "none": ""
   },
   "effects": {
-    "lost": "Lost or destroyed",
+    "destroyed": "Lost or destroyed",
+    "unavailable": "Unavailable for now",
     "disclosed": "Disclosed to an attacker",
+    "tampered": "Tampered with by an attacker",
+    "faulty": "Wrong by mistake",
     "controlled": "Controlled by an attacker",
-    "tampered": "Tampered with",
-    "blocked": "Unavailable for now",
-    "touched": "Accessed",
-    "secret_known": "Secrets known to an attacker",
-    "secret_lost": "Secrets lost",
-    "secret_blocked": "Secrets unavailable for now",
-    "privacy": "Privacy is affected",
-    "plan_impaired": "The plan cannot be used for recovery"
+    "known": "Known to the attacker"
   },
-  "wallet_flags": {
-    "tamper": "tampered with by an attacker",
-    "tamper_latent": "set up wrongly, not noticed yet",
-    "blocked": "blocked",
-    "soft": "needs a repair or replacement",
-    "privacy": "privacy affected"
+  "subtitle": {
+    "SigningDevice": "{vendor} {model}",
+    "ComputingDevice": "{kind}, {product}",
+    "Backup": "{medium}, {product.vendor} {product.model}",
+    "Location": "{kind}",
+    "Person": "{roles}",
+    "Coordinator": "{product}"
   },
   "likelihood": {
     "threat": "Base {base}: estimate for this threat.",
@@ -96,7 +141,6 @@
     "threat": "{threat} hits {class} {entity}. {description}",
     "peers": "The same cause also hits: {peers}.",
     "effect": "{label}: {entities}.",
-    "flag": "Wallet {wallet} is {flags}.",
     "outcome": "{wallet}: {label}, {detail}{exploit}.",
     "open": "Open question: {text}"
   },
@@ -136,7 +180,153 @@
     "delayed": "{person} can spend {wallet} only later than intended, or after a repair."
   },
   "not_applicable": {
-    "applies_when": "The threat does not apply to this kind of entity.",
-    "predicate": "The setup does not meet the condition of the threat ({name})."
+    "applies_when": "The threat does not apply to this kind of entity."
+  },
+  "display": {
+    "description": "How the setup diagram draws each class: lane (people, things, secrets, wallets, plan), sublane of a thing kept at a place (an index into sublanes, or by_subject for a backup), box (a container drawn around what it holds; small for a bag), hosted (drawn inside the device it runs on), fill (colour by type), neutral (colour without risk), glyph (SVG paths in a 16 x 16 box), shades (darker fill of a backup per kind of its subject). A class without an entry uses default.",
+    "lanes": [
+      "people",
+      "things",
+      "secrets",
+      "wallets",
+      "plan"
+    ],
+    "lane_titles": {
+      "people": "People",
+      "things": "Locations and what is kept in them",
+      "secrets": "Secrets",
+      "wallets": "Wallets",
+      "plan": "Plan"
+    },
+    "sublanes": [
+      "Devices and software",
+      "Seed backups",
+      "Descriptor backups",
+      "Passphrase/PIN backups",
+      "Plan copies",
+      "Strips, mixed"
+    ],
+    "subject_sublane": {
+      "seed": 1,
+      "descriptor": 2,
+      "passphrase": 3,
+      "pin": 3,
+      "plan": 4
+    },
+    "classes": {
+      "Person": {
+        "lane": "people",
+        "fill": "#fff176",
+        "neutral": "#fff8e1",
+        "glyph": "<circle cx=\"8\" cy=\"5\" r=\"3.6\"/><path d=\"M1.5 16a6.5 6.5 0 0 1 13 0z\"/>"
+      },
+      "Location": {
+        "lane": "things",
+        "fill": "#eceff1",
+        "neutral": "#f5f5f5",
+        "glyph": "<path d=\"M1 8 8 1.5 15 8v7.5H1z\"/><path d=\"M6.5 15.5v-5h3v5\"/>",
+        "box": true
+      },
+      "TamperEvidentBag": {
+        "lane": "things",
+        "fill": "#d7ccc8",
+        "neutral": "#fffde7",
+        "glyph": "<path d=\"M3 5h10l1 10H2z\"/><path d=\"M5 5V3h6v2\"/>",
+        "box": true,
+        "small": true
+      },
+      "BagStrip": {
+        "lane": "things",
+        "fill": "#a1887f",
+        "neutral": "#fffde7",
+        "glyph": "<path d=\"M1 5h14v6H1z\"/><path d=\"M5 5v6\"/>",
+        "sublane": 5
+      },
+      "SigningDevice": {
+        "lane": "things",
+        "fill": "#90caf9",
+        "neutral": "#e3f2fd",
+        "glyph": "<rect x=\"3.5\" y=\"1\" width=\"9\" height=\"14\" rx=\"1.5\"/><rect x=\"5\" y=\"3\" width=\"6\" height=\"4\"/><circle cx=\"8\" cy=\"11\" r=\"1.2\"/>",
+        "sublane": 0
+      },
+      "ComputingDevice": {
+        "lane": "things",
+        "fill": "#b39ddb",
+        "neutral": "#e8eaf6",
+        "glyph": "<rect x=\"1\" y=\"2\" width=\"14\" height=\"9\" rx=\"1\"/><path d=\"M5 14h6M8 11v3\"/>",
+        "sublane": 0
+      },
+      "Backup": {
+        "lane": "things",
+        "fill": "#a5d6a7",
+        "neutral": "#e8f5e9",
+        "glyph": "<path d=\"M3 1h7l3.5 3.5V15H3z\"/><path d=\"M5.5 8h5M5.5 11h5\"/>",
+        "sublane": "by_subject",
+        "shades": {
+          "seed": "#8bc34a",
+          "descriptor": "#f06292",
+          "passphrase": "#ffa726",
+          "pin": "#ffa726",
+          "plan": "#90a4ae"
+        }
+      },
+      "Coordinator": {
+        "lane": "things",
+        "fill": "#d1c4e9",
+        "neutral": "#eeeeee",
+        "glyph": "<rect x=\"2\" y=\"2\" width=\"12\" height=\"12\" rx=\"2\"/><path d=\"M5 6l2 2-2 2M9.5 10.5h2.5\"/>",
+        "hosted": true
+      },
+      "Seed": {
+        "lane": "secrets",
+        "fill": "#c5e1a5",
+        "neutral": "#f1f8e9",
+        "glyph": "<circle cx=\"4.5\" cy=\"8\" r=\"3\"/><path d=\"M7.5 8H15M12 8v3M14.5 8v2\"/>"
+      },
+      "Passphrase": {
+        "lane": "secrets",
+        "fill": "#ffcc80",
+        "neutral": "#fff3e0",
+        "glyph": "<path d=\"M2 5l3 6M5 5l-3 6M0.5 8h5M8 5l3 6M11 5l-3 6M6.5 8h5\"/>"
+      },
+      "PinPassword": {
+        "lane": "secrets",
+        "fill": "#ffcc80",
+        "neutral": "#fff3e0",
+        "glyph": "<path d=\"M5 2 4 14M11 2l-1 12M2 5.5h12M2 10.5h12\"/>"
+      },
+      "Descriptor": {
+        "lane": "secrets",
+        "fill": "#f8bbd0",
+        "neutral": "#f3e5f5",
+        "glyph": "<path d=\"M8 1l6 3.5v7L8 15 2 11.5v-7z\"/><path d=\"M5.5 7h5M5.5 9.5h5\"/>"
+      },
+      "Wallet": {
+        "lane": "wallets",
+        "fill": "#80deea",
+        "neutral": "#e1f5fe",
+        "glyph": "<rect x=\"1\" y=\"3.5\" width=\"14\" height=\"10\" rx=\"2\"/><path d=\"M1 6.5h14\"/><circle cx=\"11.5\" cy=\"10\" r=\"1.2\"/>"
+      },
+      "Plan": {
+        "lane": "plan",
+        "fill": "#cfd8dc",
+        "neutral": "#eceff1",
+        "glyph": "<path d=\"M1 3.5h5l1.5 2H15V14H1z\"/>"
+      },
+      "default": {
+        "lane": "things",
+        "sublane": 5,
+        "fill": "#e0e0e0",
+        "neutral": "#f5f5f5",
+        "glyph": "<rect x=\"2\" y=\"2\" width=\"12\" height=\"12\" rx=\"2\"/>"
+      }
+    }
+  },
+  "subject_of": {
+    "Seed": "seed",
+    "Descriptor": "descriptor",
+    "Passphrase": "passphrase",
+    "PinPassword": "pin",
+    "Plan": "plan"
   }
 }

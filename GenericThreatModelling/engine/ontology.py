@@ -1,8 +1,11 @@
-"""The class hierarchy of the setup ontology, read from the `x-classes` table of the normative setup schema."""
+"""The class hierarchy of the setup ontology, read from the `x-classes` table of the normative setup schema.
+The data root (the repository, or another tree with the same layout) can be set with CUSTODY_DATA_ROOT."""
 import json
+import os
 from pathlib import Path
 
-SCHEMA = json.loads((Path(__file__).resolve().parent.parent.parent / "SetupOntology.schema.json").read_text(encoding="utf-8"))
+ROOT = Path(os.environ.get("CUSTODY_DATA_ROOT") or Path(__file__).resolve().parent.parent.parent)
+SCHEMA = json.loads((ROOT / "SetupOntology.schema.json").read_text(encoding="utf-8"))
 TABLE = SCHEMA["x-classes"]
 
 CLASSES = tuple(TABLE)

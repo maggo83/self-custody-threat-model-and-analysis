@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "RecoveryActions.schema.json",
   "title": "Recovery, response and maintenance actions",
-  "description": "Actions form a tree: atomic actions are leaves with concrete requirements; composite actions combine other actions with all_of, any_of or k_of_n. Actions are parameterised by entities of the setup ontology; arguments and expressions are written as `$name` or `$name.attribute.path` and are resolved against the plan (plus the derived helpers: `copies` of a secret, i.e. its (backup, item) pairs; `seeds` of a device; `wallets` of a seed, passphrase or device; `devices` of a descriptor; `enclosing_bags` of a backup or device, outermost first; `bags`, `devices` and `backups` stored in or at a location (recursively); `items` of a backup; `people`, `locations` and `wallets` of a plan; `is_cloud` and `is_physical` of a location; `all_signers` of a wallet over all policies; `immediate_policy` of a wallet, i.e. the policy without delay; `default_descriptor` of a wallet, truthy for a default definition). Which actions help against which threat is stored here (`responds_to`), not in the threat catalogue.",
+  "description": "Actions form a tree: atomic actions are leaves with concrete requirements; composite actions combine other actions with all_of, any_of or k_of_n. The engine executes these trees: the access goals of AccessModel.json name the actions that say what spending a wallet, obtaining a secret or having a descriptor needs, and the same trees give the dependencies of a wallet, the cut sets of the deductive analysis and the steps of the manuals. Actions are parameterised by entities of the setup ontology; arguments and expressions are written as `$name` or `$name.attribute.path` and are resolved against the plan, following references and the derived attributes of AccessModel.json. Which actions help against which threat is stored here (`responds_to`), not in the threat catalogue.",
   "type": "object",
   "additionalProperties": false,
   "required": ["actions"],
@@ -26,8 +26,8 @@
       "required": ["type"],
       "properties": {
         "type": {
-          "description": "reach: physical access to a Location, bag, device or backup, including the containers it sits in (decided by Location.access). have: a tool or capability from the vocabulary in `what`. wait: a delay in blocks. intact: the item still exists and is unmodified.",
-          "enum": ["reach", "have", "wait", "intact"]
+          "description": "reach: physical access to a Location, bag, device or backup, including the containers it sits in (decided by Location.access); for the attacker: the item is disclosed or controlled. have: a tool or capability from the vocabulary in `what`; never a barrier in the analysis. wait: a delay in blocks. intact: the item still exists and is unmodified (strict evaluation: and is not unavailable); always true for the attacker. known: the attacker has the secret itself (it leaked); never true for the rightful people.",
+          "enum": ["reach", "have", "wait", "intact", "known"]
         },
         "target": { "$ref": "#/$defs/expr" },
         "what": { "enum": ["coordinator", "signing_device", "computer_offline", "computer_online", "power", "psbt_transport", "internet", "decryption_tool", "backup_tool", "new_device_source", "tamper_evident_bag"] },
@@ -49,10 +49,13 @@
           "required": ["over", "as"],
           "properties": {
             "over": { "$ref": "#/$defs/expr" },
-            "as": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" }
+            "as": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+            "class": { "description": "Class of the bound items when it cannot be told from the collection (nested parts).", "type": "string" }
           }
         },
-        "when": { "description": "Only if the expression is present or true in the plan.", "$ref": "#/$defs/expr" }
+        "when": { "description": "Only if the expression is present in the plan, or if the condition holds.", "anyOf": [{ "$ref": "#/$defs/expr" }, { "$ref": "ThreatModelCommon.schema.json#/$defs/expression" }] },
+        "optional": { "description": "The step is good practice but not needed to complete the action; the analysis skips it, the manuals show it.", "type": "boolean" },
+        "guards": { "description": "The entity this step protects: an attacker who controls that entity does not need the step (a PIN on a swapped device, a password on a coordinator whose host runs malware).", "$ref": "#/$defs/expr" }
       }
     },
     "action": {
@@ -69,8 +72,9 @@
           "enum": ["access", "restore", "response", "maintenance", "setup"]
         },
         "type": { "enum": ["atomic", "composite"] },
+        "for": { "description": "attacker: a step that only models the attacker's side (leaked knowledge); left out of the manuals.", "enum": ["attacker"] },
         "params": { "type": "array", "items": { "$ref": "#/$defs/param" } },
-        "requires": { "description": "Atomic actions only.", "type": "array", "items": { "$ref": "#/$defs/requirement" } },
+        "requires": { "description": "Atoms the action needs; a composite action may add atoms to its steps.", "type": "array", "items": { "$ref": "#/$defs/requirement" } },
         "combinator": { "description": "Composite actions only. all_of: every step. any_of: one alternative suffices. k_of_n: at least k steps (usually over a foreach).", "enum": ["all_of", "any_of", "k_of_n"] },
         "k": { "oneOf": [{ "type": "integer", "minimum": 1 }, { "$ref": "#/$defs/expr" }] },
         "steps": { "description": "Composite actions only.", "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/step" } },
@@ -80,7 +84,7 @@
       },
       "allOf": [
         { "if": { "properties": { "type": { "const": "atomic" } } }, "then": { "required": ["requires"], "not": { "anyOf": [{ "required": ["steps"] }, { "required": ["combinator"] }] } } },
-        { "if": { "properties": { "type": { "const": "composite" } } }, "then": { "required": ["combinator", "steps"], "not": { "required": ["requires"] } } },
+        { "if": { "properties": { "type": { "const": "composite" } } }, "then": { "required": ["combinator", "steps"] } },
         { "if": { "properties": { "combinator": { "const": "k_of_n" } }, "required": ["combinator"] }, "then": { "required": ["k"] } }
       ]
     }

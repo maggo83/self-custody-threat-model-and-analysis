@@ -1,8 +1,10 @@
 """Ratings: likelihood, vulnerability (protection by mechanisms present in the setup), severity, risk."""
 from collections import defaultdict
+from itertools import combinations, product
 
-import ontology
-import predicates
+import access
+from graph import INF, evaluate, flag
+from ontology import is_a
 
 
 def clamp(v, lo=0, hi=4):
@@ -43,10 +45,6 @@ def likelihood(S, cat, threat, eid, answers=None):
 
 # ---------------------------------------------------------------- mechanisms present in the setup
 
-def target_entities(S, target):
-    return S.ids_of(target)
-
-
 def effective_schedule(m, practice):
     sched = dict(m.get("schedule", {}))
     if practice and practice.get("interval_months"):
@@ -54,68 +52,122 @@ def effective_schedule(m, practice):
     return sched
 
 
+def quorum_minutes(S, pid):
+    """Least time the person needs to bring together what spends a main wallet at once, starting at the best place;
+    INF if they cannot alone. The places are those of the parts the person must reach in the access tree."""
+    best = INF
+    spec, asset = S.model.get("travel", {}), S.model["asset"]
+    st = access.State()
+    agent = access.People(S, st, [pid], False)
+    for w in S.ids_of(asset["class"]):
+        if not S.holds(w, asset["main_when"]):
+            continue
+        for i, pol in enumerate(S.ent(w)[asset["policies"][:-2]]):
+            if spec.get("immediate_policies_only", True) and pol.get("delay_blocks", 0):
+                continue
+            node = access.spend_tree(S, w, i)
+            for stops in journeys(S, node, agent):
+                best = min(best, S.journey(stops))
+    return best
+
+
+def journeys(S, node, agent, memo=None):
+    """Sets of top-level places the agent must visit to complete the node, one per way of doing it (pruned)."""
+    memo = {} if memo is None else memo
+    if id(node) in memo:
+        return memo[id(node)]
+    if node.get("cycle") or node.get("missing") or access.value(node, agent) == INF:
+        return []
+    own = set()
+    for a in node["requires"]:
+        if a["type"] == "reach" and agent.reach(a["target"]):
+            p = S.place(a["target"])
+            if p and not S.no_travel(p):
+                own.add(S.root(p))
+    kids = [journeys(S, c, agent, memo) for c in node["children"] if not c.get("optional") and access.value(c, agent) < INF]
+    if node["op"] == "any":
+        out = [frozenset(own) | s for k in kids for s in k] or [frozenset(own)]
+    else:
+        need = len(kids) if node["op"] == "all" else min(node.get("k") or 1, len(kids))
+        out = []
+        for combo in combinations(kids, need):
+            for pick in product(*combo):
+                out.append(frozenset(own).union(*pick))
+        out = out or [frozenset(own)]
+    out = sorted(set(out), key=len)[:50]
+    memo[id(node)] = out
+    return out
+
+
 def mechanism_instances(S, cat, implicit=True):
     """Index threat id -> mechanism instances that are present in the setup. A procedural mechanism is present through
     a practice, or, with `implicit`, because the entity is used in a way that does it anyway (implicit_when)."""
     index = defaultdict(list)
     practices = S.data.get("practices", [])
+    bands = cat.ratings["protection"].get("travel_minutes", [])
     for m in cat.mechanisms.values():
         if m["form"] == "principle":
             continue
-        for eid in target_entities(S, m["target"]):
-            pred = m.get("predicate")
+        for eid in S.ids_of(m["target"]):
+            fixed = measure = None
             if m["form"] == "structural":
-                ok = S.holds(eid, m.get("present_when")) and (not pred or predicates.holds(S, pred, eid))
                 practice = None
+                if m.get("strength_from"):
+                    measure = quorum_minutes(S, eid)
+                    fixed = max((b["value"] for b in bands if measure >= b["at_least"]), default=0)
+                    ok = fixed > 0
+                else:
+                    ok = S.holds(eid, m.get("present_when"))
             else:
                 practice = next((p for p in practices if p["mechanism"] == m["id"] and (not p.get("scope") or eid in p["scope"])), None)
                 by_use = implicit and bool(m.get("implicit_when")) and S.holds(eid, m["implicit_when"])
-                ok = (practice is not None or by_use) and S.holds(eid, m.get("applies_when")) and (not pred or predicates.holds(S, pred, eid))
+                ok = (practice is not None or by_use) and S.holds(eid, m.get("applies_when"))
             if not ok:
                 continue
-            fixed = measure = None
-            if m.get("strength_from"):
-                measure = S.quorum_minutes(eid)
-                fixed = max((b["value"] for b in cat.ratings["protection"]["travel_minutes"] if measure >= b["at_least"]), default=0)
             sched = effective_schedule(m, practice)
             for a in m["addresses"]:
                 index[a["threat"]].append({"mechanism": m["id"], "entity": eid, "effect": a["effect"], "kind": m["kind"],
-                                           "schedule": sched, "covers": m.get("covers", "self"),
+                                           "schedule": sched, "covers": m.get("covers", "self"), "covers_when": m.get("covers_when"),
                                            "group": m.get("quorum_group", m["id"]), "weaken": m.get("weakened_when", []),
-                                           "strength": fixed, "measure": measure})
+                                           "barrier_for": m.get("barrier_for", []), "strength": fixed, "measure": measure})
     return index
 
 
 def footprint(S, target_ids, st, outcomes):
     ids = set(target_ids) | {o["wallet"] for o in outcomes if o["outcome"] != "none"}
     for o in outcomes:
-        ids |= S.deps(o["wallet"])
+        ids |= access.deps(S, o["wallet"])
     for e in list(ids):
-        if e in S.by_id and S.loc_of(e):
-            loc = S.loc_of(e)
-            while loc:
-                ids.add(loc)
-                loc = S.ent(loc).get("part_of")
+        if e in S.by_id:
+            ids.update(p for p in (S.place(e), *S.chain(e)) if p)
     return ids
 
 
 def related(S, inst, fp):
+    if inst.get("covers_when") is not None:
+        return S.holds(inst["entity"], inst["covers_when"], {"$footprint": sorted(fp)})
     if inst["covers"] == "own":
         return inst["entity"] in fp
     c = S.cls(inst["entity"])
-    if c in ("Plan", "Person"):
+    if flag(c, "singleton") or is_a(c, S.model["actor"]["class"]):
         return True
-    if inst["covers"] == "colocated_secrets":
-        mine = set()
-        for sid in S.deps(inst["entity"]):
-            if S.cls(sid) in ontology.CREDENTIALS:
-                mine |= {S.root(l) for l in S.secret_locations(sid)}
-        theirs = {S.root(e) for e in fp if e in S.by_id and S.cls(e) == "Location"}
-        return bool(mine & theirs)
     return inst["entity"] in fp
 
 
-def vulnerability(S, cat, tid, insts, fp, exploit, wallet=None, known=(), barrier=()):
+def quorum_covered(S, wid, devices):
+    """Every group of signers that can spend under one policy has a member whose devices all are in `devices`."""
+    q, asset = S.model["asset"]["quorum"], S.model["asset"]
+    for p in S.ent(wid)[asset["policies"][:-2]]:
+        uncovered = 0
+        for sg in p["signers"]:
+            ds = set(S.values(sg, q["signer_devices"]))
+            uncovered += not ds or not ds <= set(devices)
+        if uncovered >= S.values(p, q["threshold"])[0]:
+            return False
+    return True
+
+
+def vulnerability(S, cat, tid, insts, fp, exploit, wallet=None, st=None, barrier=()):
     prot = cat.ratings["protection"]
     det = prot["detection"]
     fast = det["fast_enough"].get(exploit, "any")
@@ -128,13 +180,13 @@ def vulnerability(S, cat, tid, insts, fp, exploit, wallet=None, known=(), barrie
         rec["entities"].append(inst["entity"])
         if inst["covers"] == "quorum" and wallet:
             having = {i["entity"] for i in insts if i["group"] == inst["group"]}
-            if not S.quorum_covered(wallet, having):
+            if not quorum_covered(S, wallet, having):
                 rec["note"] = "quorum_gap"
                 continue
         if inst["effect"] in ("eliminates", "reduces"):
             strength = inst["strength"] if inst.get("strength") is not None else prot["prevention"][inst["effect"]]
             if inst.get("measure") is not None:
-                rec["minutes"] = None if inst["measure"] == float("inf") else inst["measure"]
+                rec["minutes"] = None if inst["measure"] == INF else inst["measure"]
             prevention = max(prevention, strength)
         else:
             sched, strengths = inst["schedule"], []
@@ -151,7 +203,7 @@ def vulnerability(S, cat, tid, insts, fp, exploit, wallet=None, known=(), barrie
             elif strength == 0:
                 rec.setdefault("note", "too_slow")
             for rule in inst["weaken"]:
-                if strength and predicates.KNOWLEDGE[rule["known"]](S, inst["entity"], known):
+                if strength and S.holds(inst["entity"], rule["when"], {"@state": st or access.State()}):
                     strength = max(0, strength + rule["delta"])
                     rec["weakened"] = rule["reason"]
                     break
@@ -159,11 +211,11 @@ def vulnerability(S, cat, tid, insts, fp, exploit, wallet=None, known=(), barrie
         if strength > rec["strength"]:
             rec["strength"] = strength
             rec.pop("note", None)
-    if exploit == "after_delay" and wallet:
+    if wallet:
         for inst in barrier:
-            if inst["entity"] != wallet or inst["effect"] not in ("eliminates", "reduces"):
+            if inst["entity"] != wallet or exploit not in inst.get("barrier_for", []) or inst["effect"] not in ("eliminates", "reduces"):
                 continue
-            strength = prot["after_delay"][inst["effect"]]
+            strength = prot[exploit][inst["effect"]]
             rec = grouped.setdefault((inst["mechanism"], inst["effect"]), {"mechanism": inst["mechanism"], "effect": inst["effect"], "entities": [], "strength": 0})
             rec["entities"].append(wallet)
             rec["strength"], rec["barrier"] = max(rec["strength"], strength), True

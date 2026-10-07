@@ -4,7 +4,7 @@
   "title": "Rating scales and tables of the threat analysis",
   "type": "object",
   "additionalProperties": false,
-  "required": ["scales", "outcomes", "protection", "residual_likelihood", "risk_matrix"],
+  "required": ["scales", "outcomes", "outcome_by_asset", "outcome_rules", "protection", "residual_likelihood", "risk_matrix"],
   "properties": {
     "status": { "type": "string" },
     "scales": {
@@ -25,6 +25,35 @@
         "additionalProperties": false,
         "required": ["severity", "description"],
         "properties": { "severity": { "$ref": "#/$defs/band" }, "description": { "type": "string" } }
+      }
+    },
+    "outcome_by_asset": {
+      "description": "Outcome names that stand for a pair [main wallet, auxiliary wallet].",
+      "type": "object",
+      "properties": { "description": { "type": "string" } },
+      "additionalProperties": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "string" } }
+    },
+    "outcome_rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rules"],
+      "properties": {
+        "description": { "type": "string" },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["outcome", "when", "detail"],
+            "properties": {
+              "outcome": { "type": "string" },
+              "when": { "$ref": "ThreatModelCommon.schema.json#/$defs/expression" },
+              "unless_emitted": { "type": "array", "items": { "type": "string" } },
+              "detail": { "type": "string" },
+              "exploit": { "type": "string" }
+            }
+          }
+        }
       }
     },
     "protection": {
@@ -56,6 +85,7 @@
           }
         },
         "after_delay": { "type": "object", "additionalProperties": false, "required": ["eliminates", "reduces"], "properties": { "description": { "type": "string" }, "eliminates": { "$ref": "#/$defs/band" }, "reduces": { "$ref": "#/$defs/band" } } },
+        "exploits": { "type": "object", "additionalProperties": false, "required": ["order"], "properties": { "description": { "type": "string" }, "order": { "type": "array", "items": { "type": "string" } } } },
         "travel_minutes": { "description": "Protection of a mechanism that makes a person travel before they can spend: the value of the highest row whose at_least minutes the least journey reaches.", "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["at_least", "value"], "properties": { "at_least": { "type": "integer", "minimum": 1 }, "value": { "$ref": "#/$defs/band" } } } },
         "bonus_prevention_and_detection": { "type": "integer", "minimum": 0 },
         "max": { "$ref": "#/$defs/band" }

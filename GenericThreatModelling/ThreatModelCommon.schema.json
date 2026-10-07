@@ -21,12 +21,12 @@
       "enum": ["setup", "generation", "storage", "use", "maintenance", "recovery"]
     },
     "impactOn": {
-      "description": "Which items are affected, relative to the target entity. self: the target (for a secret: the secret as information). contents: everything stored in or at a Location or TamperEvidentBag, recursively through sub-locations and bags. intrusion_contents: what an intruder finds: everything in view, and a concealed sub-location only when it is the target itself (then the visible parts above it as well). area_contents: contents of the Location and of every location linked to it by `near` (close enough to be hit by the same area-wide event). knowledge: items in the Person's memory (backups with medium memory at the Person's location). access: contents of all locations the Person can physically reach. items: the secrets and plan copies carried by a Backup. loaded_seeds: seeds loaded on a SigningDevice. same_model_devices / same_vendor_devices: all other devices of the plan with the same catalog model or vendor. wallets: wallets that depend on the target (via a seed, a device, the coordinator or the descriptor). protects: what the target secret protects (devices using it as PIN, items encrypted with it, wallets whose signers use it).",
-      "enum": ["self", "contents", "intrusion_contents", "area_contents", "knowledge", "access", "items", "loaded_seeds", "same_model_devices", "same_vendor_devices", "wallets", "protects"]
+      "description": "Which items are affected, relative to the target entity. The names are defined in the `selectors` table of AccessModel.json; the engine implements only the forms used there (self, placed_in with its options, path, peers).",
+      "type": "string"
     },
     "impactKind": {
-      "description": "destroyed: gone for good. unavailable: cannot be used for now or until some action is taken. disclosed: an attacker obtains a copy or the knowledge. tampered: content or state is changed, replaced or wrong. controlled: the attacker can make the item act as he wants. misused: the holder uses what they can reach or know in an unintended way (impaired judgement).",
-      "enum": ["destroyed", "unavailable", "disclosed", "tampered", "controlled", "misused"],
+      "description": "destroyed: gone for good. unavailable: cannot be used for now or until some action is taken. disclosed: an attacker obtains a copy or the knowledge. tampered: an attacker changed or replaced it; the rightful people cannot use it, and if it is an active part (device, coordinator, wallet: class flag `active`) the attacker commands it. faulty: wrong by mistake (a transcription error, a wrong policy); the rightful people cannot use it, nobody profits. controlled: the attacker can make the item act as he wants. misused: the holder uses what they can reach or know in an unintended way (impaired judgement); counts as a leak.",
+      "enum": ["destroyed", "unavailable", "disclosed", "tampered", "faulty", "controlled", "misused"],
       "x-leak": ["disclosed", "misused"]
     },
     "threatId": { "type": "string", "pattern": "^T-[A-Z0-9]+(-[A-Z0-9]+)+$" },
@@ -37,7 +37,7 @@
       "enum": ["notes", "added"]
     },
     "condition": {
-      "description": "Test on one attribute. `path` is an attribute of the item under test as it appears in the plan JSON (e.g. `kind`, `medium`, `generation`), or `catalog.<column>` for the item's row in a lookup table (device catalog for SigningDevice, metal backup catalog for Backup via its `product`, LocationKinds for Location). List-valued attributes match if any element matches. An attribute or catalog value that is missing or blank never satisfies `in` or `matches`, and always satisfies `not_in` and `not_matches` (unknown counts as not satisfied).",
+      "description": "Test on one attribute path. `path` starts at the item under test (or at a bound variable `$x`) and walks attributes as they appear in the plan JSON (`kind`, `items[].format`), follows references into the entities they point to (`seed.devices`), reads `catalog.<column>` of the item's lookup row, the pseudo attributes `class` (with ancestors), `root`, `place`, `container`, and the derived attributes of AccessModel.json. List-valued paths match if any element matches. A missing or blank value never satisfies `in`, `matches`, `eq`, `contains`, `intersects`, `nonempty` or a comparison, and always satisfies `not_in`, `not_matches`, `neq` and `disjoint`. Values of `eq`, `neq`, `contains`, `intersects`, `disjoint` and the comparisons may be `$paths`; `count: true` compares the number of distinct values.",
       "type": "object",
       "additionalProperties": false,
       "required": ["path"],
@@ -46,13 +46,16 @@
         "in": { "type": "array", "items": {} },
         "not_in": { "type": "array", "items": {} },
         "matches": { "type": "string", "description": "Regular expression." },
-        "not_matches": { "type": "string", "description": "Regular expression." }
+        "not_matches": { "type": "string", "description": "Regular expression." },
+        "eq": {}, "neq": {}, "contains": {}, "intersects": {}, "disjoint": {},
+        "gt": {}, "ge": {}, "lt": {}, "le": {},
+        "nonempty": { "type": "boolean" },
+        "count": { "type": "boolean" }
       },
       "oneOf": [
-        { "required": ["in"] },
-        { "required": ["not_in"] },
-        { "required": ["matches"] },
-        { "required": ["not_matches"] }
+        { "required": ["in"] }, { "required": ["not_in"] }, { "required": ["matches"] }, { "required": ["not_matches"] },
+        { "required": ["eq"] }, { "required": ["neq"] }, { "required": ["contains"] }, { "required": ["intersects"] }, { "required": ["disjoint"] },
+        { "required": ["gt"] }, { "required": ["ge"] }, { "required": ["lt"] }, { "required": ["le"] }, { "required": ["nonempty"] }
       ]
     },
     "conditions": {
@@ -60,6 +63,22 @@
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/$defs/condition" }
+    },
+    "expression": {
+      "description": "A boolean expression over the setup: a condition; a list of conditions (all); {all: [...]}; {any: [...]}; {not: e}; {forall | exists: <class name or $path>, as: '$x', class: <nested class>, where: e}; {can: {agent, action, args, strict}} asks the access module whether an agent (everyone, attacker, {person: $p}, {place: $l}) completes an action; a plain string names a fact of the outcome rules.",
+      "anyOf": [
+        { "$ref": "#/$defs/condition" },
+        { "$ref": "#/$defs/conditions" },
+        { "type": "string" },
+        { "type": "object", "additionalProperties": false, "required": ["all"], "properties": { "all": { "type": "array", "items": { "$ref": "#/$defs/expression" } } } },
+        { "type": "object", "additionalProperties": false, "required": ["any"], "properties": { "any": { "type": "array", "items": { "$ref": "#/$defs/expression" } } } },
+        { "type": "object", "additionalProperties": false, "required": ["not"], "properties": { "not": { "$ref": "#/$defs/expression" } } },
+        { "type": "object", "additionalProperties": false, "required": ["forall", "as", "where"], "properties": { "forall": { "type": "string" }, "as": { "type": "string", "pattern": "^\\$" }, "class": { "type": "string" }, "where": { "$ref": "#/$defs/expression" } } },
+        { "type": "object", "additionalProperties": false, "required": ["exists", "as", "where"], "properties": { "exists": { "type": "string" }, "as": { "type": "string", "pattern": "^\\$" }, "class": { "type": "string" }, "where": { "$ref": "#/$defs/expression" } } },
+        { "type": "object", "additionalProperties": false, "required": ["can"], "properties": { "can": {
+          "type": "object", "additionalProperties": false, "required": ["action"],
+          "properties": { "agent": {}, "action": { "$ref": "#/$defs/actionId" }, "args": { "type": "object" }, "strict": { "type": "boolean" } } } } }
+      ]
     },
     "predicate": {
       "description": "A named test that is too structural for a condition (graph or count questions). Implemented by the analysis; the name is the contract.",

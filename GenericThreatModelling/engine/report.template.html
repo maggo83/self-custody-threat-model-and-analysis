@@ -151,6 +151,7 @@ ul.steps small { display: block; }
     <a href="#diagram" data-tab="diagram">Setup diagram</a>
     <a href="#measures" data-tab="measures">Measures</a>
     <a href="#access" data-tab="access">Access</a>
+    <a href="#faults" data-tab="faults">Fault trees</a>
     <a class="newtab" id="newtab" target="_blank">open this view in a new tab</a>
     <button id="dark" title="Switch to dark colors" aria-label="Switch between light and dark colors">
       <svg class="moon" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 0 0 12z" fill="currentColor"/></svg>
@@ -197,6 +198,7 @@ ul.steps small { display: block; }
 
   <section id="view-measures" class="hidden"></section>
   <section id="view-access" class="hidden"></section>
+  <section id="view-faults" class="hidden"></section>
 </main>
 <div id="tip"></div>
 
@@ -204,7 +206,10 @@ ul.steps small { display: block; }
 const DATA = __DATA__;
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const RISK = DATA.texts.risk_labels, CLASSES = DATA.texts.classes;
+const RISK = DATA.texts.risk_labels, CLASSES = DATA.texts.classes, DISPLAY = DATA.texts.display, ROLES = DATA.roles;
+const D = c => DISPLAY.classes[c] || DISPLAY.classes.default;
+const LANE = Object.fromEntries(DISPLAY.lanes.map((l, i) => [l, i]));
+const classesIn = lane => Object.keys(DISPLAY.classes).filter(c => c !== 'default' && DISPLAY.classes[c].lane === lane);
 const COLOR = ['#c8e6c9', '#e6ee9c', '#ffe082', '#ffab91', '#ef5350'];
 const chip = v => `<span class="chip r${v}">${v}</span>`;
 const plain = xs => xs.map(x => `<div>${esc(x)}</div>`).join('');
@@ -507,7 +512,7 @@ function tableView() {
   const src = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   MARK = q ? new RegExp(src, 'gi') : null;
   const test = q ? new RegExp(src, 'i') : null;
-  const hay = r => [r.en, CLASSES[r.c][0], r.t, r.tn, r.eff || '', r.why || '', ...(r.V && r.V.m ? r.V.m.map(m => m.name) : []), ...(explain && r.L && r.L.x ? [...r.L.x, ...r.V.x, ...r.S.x] : [])].join('\n');
+  const hay = r => [r.id, r.en, CLASSES[r.c][0], r.t, r.tn, r.eff || '', r.why || '', ...(r.V && r.V.m ? r.V.m.map(m => m.name) : []), ...(explain && r.L && r.L.x ? [...r.L.x, ...r.V.x, ...r.S.x] : [])].join('\n');
   const ok = r => (!cls || r.c === cls) && (!test || test.test(hay(r)));
   const rows = DATA.rows.filter(r => r.R >= min && r.S.v >= sev && ok(r) && (!rv || (rv === 'done') === REVIEWED.has(r.id)));
   $('#showna').disabled = min > 0 || sev > 0;
@@ -523,12 +528,7 @@ const NA = DATA.na.map(n => ({ ...n, na: true, eff: 'Not applicable', L: { v: -1
 // ---------------------------------------------------------------- setup diagram: three lanes
 const ST = DATA.structure;
 const NODE = Object.fromEntries(ST.nodes.map(n => [n.id, n]));
-const laneOf = id => {
-  const c = NODE[id.split('#')[0]].c;
-  return c === 'Person' ? 0 : ['Seed', 'Passphrase', 'PinPassword', 'Descriptor'].includes(c) ? 2 : c === 'Wallet' ? 3 : c === 'Plan' ? 4 : 1;
-};
-const NEUTRAL = { Person: '#fff8e1', Location: '#f5f5f5', TamperEvidentBag: '#fffde7', BagStrip: '#fffde7', SigningDevice: '#e3f2fd', ComputingDevice: '#e8eaf6', Backup: '#e8f5e9', Seed: '#f1f8e9', Passphrase: '#fff3e0', PinPassword: '#fff3e0', Descriptor: '#f3e5f5', Wallet: '#e1f5fe', Coordinator: '#eeeeee', Plan: '#eceff1' };
-const TYPE_FILL = { Person: '#fff176', Location: '#eceff1', TamperEvidentBag: '#d7ccc8', BagStrip: '#a1887f', SigningDevice: '#90caf9', ComputingDevice: '#b39ddb', Backup: '#a5d6a7', Seed: '#c5e1a5', Passphrase: '#ffcc80', PinPassword: '#ffcc80', Descriptor: '#f8bbd0', Wallet: '#80deea', Coordinator: '#d1c4e9', Plan: '#cfd8dc' };
+const laneOf = id => LANE[D(NODE[id.split('#')[0]].c).lane];
 const EDGE = {
   access: { c: '#795548', d: '2 4', t: 'person can enter' }, signer: { c: '#37474f', d: '', t: 'policy uses seed' },
   passphrase: { c: '#ef6c00', d: '6 3', t: 'passphrase of the signer' }, loaded: { c: '#2e7d32', d: '', t: 'seed loaded on device' },
@@ -537,49 +537,31 @@ const EDGE = {
   descriptor: { c: '#1565c0', d: '', t: 'wallet descriptor' },
   plan: { c: '#b0bec5', d: '', t: 'plan contains wallet' }, strip: { c: '#9e9e9e', d: '4 3', t: 'bag strip' },
 };
-const GLYPH = {
-  Person: '<circle cx="8" cy="5" r="3.6"/><path d="M1.5 16a6.5 6.5 0 0 1 13 0z"/>',
-  Location: '<path d="M1 8 8 1.5 15 8v7.5H1z"/><path d="M6.5 15.5v-5h3v5"/>',
-  TamperEvidentBag: '<path d="M3 5h10l1 10H2z"/><path d="M5 5V3h6v2"/>',
-  BagStrip: '<path d="M1 5h14v6H1z"/><path d="M5 5v6"/>',
-  SigningDevice: '<rect x="3.5" y="1" width="9" height="14" rx="1.5"/><rect x="5" y="3" width="6" height="4"/><circle cx="8" cy="11" r="1.2"/>',
-  Backup: '<path d="M3 1h7l3.5 3.5V15H3z"/><path d="M5.5 8h5M5.5 11h5"/>',
-  Seed: '<circle cx="4.5" cy="8" r="3"/><path d="M7.5 8H15M12 8v3M14.5 8v2"/>',
-  Passphrase: '<path d="M2 5l3 6M5 5l-3 6M0.5 8h5M8 5l3 6M11 5l-3 6M6.5 8h5"/>',
-  PinPassword: '<path d="M5 2 4 14M11 2l-1 12M2 5.5h12M2 10.5h12"/>',
-  Descriptor: '<path d="M8 1l6 3.5v7L8 15 2 11.5v-7z"/><path d="M5.5 7h5M5.5 9.5h5"/>',
-  Wallet: '<rect x="1" y="3.5" width="14" height="10" rx="2"/><path d="M1 6.5h14"/><circle cx="11.5" cy="10" r="1.2"/>',
-  Coordinator: '<rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 6l2 2-2 2M9.5 10.5h2.5"/>',
-  ComputingDevice: '<rect x="1" y="2" width="14" height="9" rx="1"/><path d="M5 14h6M8 11v3"/>',
-  Plan: '<path d="M1 3.5h5l1.5 2H15V14H1z"/>',
-};
-const glyph = (c, x, y) => `<g transform="translate(${x} ${y})" fill="none" stroke="#455a64" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round">${GLYPH[c] || ''}</g>`;
+const glyph = (c, x, y) => `<g transform="translate(${x} ${y})" fill="none" stroke="#455a64" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round">${D(c).glyph}</g>`;
 const fit = (s, px, size) => { const n = Math.max(3, Math.floor(px / (size * .54))); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
 function buildLayout(withImplicit) {
   const live = n => withImplicit || !n.implicit;
   const pos = {}, containers = [], cards = [], heads = [], kids = {};
   const PAD = 10, HEAD = 32, CH = 52, GAP = 8, TOP = 62, LW = 156, CW = 148;
-  const ALL_LANES = ['Devices and software', 'Seed backups', 'Descriptor backups', 'Passphrase/PIN backups', 'Plan copies', 'Strips, mixed'];
-  const isBox = n => n.c === 'Location' || n.c === 'TamperEvidentBag';
+  const ALL_LANES = DISPLAY.sublanes;
+  const isBox = n => !!D(n.c).box;
   const depthOf = n => { let d = 0; for (let c = n; c.in !== undefined && NODE[c.in]; c = NODE[c.in]) d++; return d; };
   const maxDepth = Math.max(0, ...ST.nodes.filter(isBox).map(depthOf));
   const rawLane = n => {
-    if (['SigningDevice', 'ComputingDevice', 'Coordinator'].includes(n.c)) return 0;
-    if (n.c === 'Backup') {
-      const s = n.subjects || [];
-      if (s.length === 1 && s[0] === 'seed') return 1;
-      if (s.length === 1 && s[0] === 'descriptor') return 2;
-      if (s.length && s.every(k => k === 'passphrase' || k === 'pin')) return 3;
-      if (s.length === 1 && s[0] === 'plan') return 4;
-    }
-    return 5;
+    const d = D(n.c);
+    if (d.hosted) return 0;
+    if (d.sublane === 'by_subject') {
+      const s = [...new Set((n.subjects || []).map(k => DISPLAY.subject_sublane[k]))];
+      if (s.length === 1 && s[0] !== undefined) return s[0];
+    } else if (d.sublane !== undefined) return d.sublane;
+    return ALL_LANES.length - 1;
   };
   // only the sub-lanes that hold something
-  const heldByPerson = n => NODE[n.in] && NODE[n.in].c === 'Person';
-  const lanesOf = f => [...new Set(ST.nodes.filter(n => n.in !== undefined && !isBox(n) && n.c !== 'Coordinator' && f(n)).map(rawLane))].sort();
+  const heldByPerson = n => NODE[n.in] && NODE[n.in].c === ROLES.actor;
+  const lanesOf = f => [...new Set(ST.nodes.filter(n => n.in !== undefined && !isBox(n) && !D(n.c).hosted && f(n)).map(rawLane))].sort();
   const used = lanesOf(n => !heldByPerson(n)), usedP = lanesOf(heldByPerson);
-  const hasLocations = ST.nodes.some(n => n.c === 'Location');
+  const hasLocations = ST.nodes.some(n => isBox(n) && n.in === undefined);
   const SUBLANES = used.map(i => ALL_LANES[i]);
   const slot = Object.fromEntries(used.map((r, i) => [r, i]));
   const pslot = Object.fromEntries(usedP.map((r, i) => [r, i]));
@@ -588,8 +570,8 @@ function buildLayout(withImplicit) {
   const laneX = i => xM + PAD * (maxDepth + 1) + i * LW;
   const pLaneX = i => W0 + PAD + i * LW;
   const hosted = {};
-  for (const n of ST.nodes) if (n.c === 'Coordinator' && n.in !== undefined) (hosted[n.in] = hosted[n.in] || []).push(n);
-  for (const n of ST.nodes) if (n.in !== undefined && n.c !== 'Coordinator') (kids[n.in] = kids[n.in] || []).push(n);
+  for (const n of ST.nodes) if (D(n.c).hosted && n.in !== undefined) (hosted[n.in] = hosted[n.in] || []).push(n);
+  for (const n of ST.nodes) if (n.in !== undefined && !D(n.c).hosted) (kids[n.in] = kids[n.in] || []).push(n);
   // devices and backups in sub-lanes; a device grows to hold its software, seeds and descriptors
   function placeItems(items, cy, lx, slotOf, n) {
     const ys = Array.from({ length: n }, () => cy);
@@ -628,18 +610,19 @@ function buildLayout(withImplicit) {
     pos[n.id].h = Math.max(cy - y - (mine.length ? GAP : 0), HEAD - 8) + PAD;
     return pos[n.id].h;
   }
-  heads.push({ x: W0, y: 26, t: 'People' }, ...(hasLocations ? [{ x: xM, y: 26, t: 'Locations and what is kept in them' }] : []), { x: xS, y: 26, t: 'Secrets' }, { x: xW, y: 26, t: 'Wallets' }, { x: xC, y: 26, t: 'Plan' });
+  const T = DISPLAY.lane_titles;
+  heads.push({ x: W0, y: 26, t: T.people }, ...(hasLocations ? [{ x: xM, y: 26, t: T.things }] : []), { x: xS, y: 26, t: T.secrets }, { x: xW, y: 26, t: T.wallets }, { x: xC, y: 26, t: T.plan });
   SUBLANES.forEach((t, i) => heads.push({ x: laneX(i), y: 50, t, small: true, w: LW - 6 }));
   usedP.forEach((r, i) => heads.push({ x: pLaneX(i), y: 50, t: ALL_LANES[r], small: true, w: LW - 6 }));
   let y = TOP;
-  for (const n of ST.nodes.filter(n => n.c === 'Person')) {
+  for (const n of ST.nodes.filter(n => n.c === ROLES.actor)) {
     const held = (kids[n.id] || []).filter(k => !isBox(k));
     if (held.length) y += personBox(n, W0, y, wP, held) + 14;
     else { pos[n.id] = { x: W0, y, w: wP, h: 56 }; cards.push(n.id); y += 70; }
   }
   let hL = y;
   y = TOP;
-  for (const n of ST.nodes.filter(n => n.c === 'Location' && n.in === undefined)) y += box(n, xM, y, wM) + 16;
+  for (const n of ST.nodes.filter(n => isBox(n) && n.in === undefined)) y += box(n, xM, y, wM) + 16;
   let hM = y;
   const column = (x, w, classes, sub) => {
     let cy = TOP;
@@ -649,7 +632,7 @@ function buildLayout(withImplicit) {
       if (sub) { heads.push({ x, y: cy + 10, t: CLASSES[c][1], small: true }); cy += 18; }
       for (const n of ns) {
         const rows = n.policies || [];
-        const h = c === 'Wallet' ? 30 + rows.length * 18 + 4 : 40;
+        const h = c === ROLES.asset ? 30 + rows.length * 18 + 4 : 40;
         pos[n.id] = { x, y: cy, w, h };
         rows.forEach((_, i) => { pos[`${n.id}#${i + 1}`] = { x: x + 6, y: cy + 28 + i * 18, w: w - 12, h: 17 }; });
         cards.push(n.id);
@@ -659,17 +642,17 @@ function buildLayout(withImplicit) {
     }
     return cy;
   };
-  const hS = column(xS, wS, ['Descriptor', 'Seed', 'Passphrase', 'PinPassword'], true);
-  const hW = column(xW, wW, ['Wallet'], false);
-  const hC = column(xC, wC, ['Plan'], true);
+  const hS = column(xS, wS, classesIn('secrets'), true);
+  const hW = column(xW, wW, classesIn('wallets'), false);
+  const hC = column(xC, wC, classesIn('plan'), true);
   const H = Math.max(hL, hM, hS, hW, hC) + 20;
   return { pos, containers, cards, heads, W: xC + wC + 60, H, lanes: { xs: (SUBLANES.length ? SUBLANES.map((_, i) => laneX(i) - 4).concat(laneX(SUBLANES.length) - 4) : []).concat(usedP.length ? usedP.map((_, i) => pLaneX(i) - 4).concat(pLaneX(usedP.length) - 4) : []), y1: TOP - 10, y2: H - 10 } };
 }
 const LAYOUT = buildLayout(false);
-const BACKUP_FILL = { seed: '#8bc34a', descriptor: '#f06292', secret: '#ffa726', plan: '#90a4ae' };
-const backupKind = n => { const first = ['seed', 'descriptor', 'pin', 'passphrase', 'plan'].find(k => (n.subjects || []).includes(k)); return first === 'pin' || first === 'passphrase' ? 'secret' : first || null; };
-const typeFill = id => { const n = NODE[id]; return n.c === 'Backup' ? BACKUP_FILL[backupKind(n)] || TYPE_FILL.Backup : TYPE_FILL[n.c]; };
-const fillOf = (id, byType) => byType ? typeFill(id) : maxRisk[id] !== undefined ? COLOR[maxRisk[id]] : NEUTRAL[NODE[id].c];
+const ALL_LANES_LAST = DISPLAY.sublanes.length - 1;
+const shadeOf = n => { const sh = D(n.c).shades || {}; const first = Object.keys(sh).find(k => (n.subjects || []).includes(k)); return first ? sh[first] : null; };
+const typeFill = id => { const n = NODE[id]; return shadeOf(n) || D(n.c).fill; };
+const fillOf = (id, byType) => byType ? typeFill(id) : maxRisk[id] !== undefined ? COLOR[maxRisk[id]] : D(NODE[id].c).neutral;
 
 function diagramSvg(opt = {}) {
   const LY = opt.layout || LAYOUT;
@@ -682,7 +665,7 @@ function diagramSvg(opt = {}) {
   const o = [`<svg class="dgm" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${LY.W} ${LY.H}" data-w="${LY.W}" data-h="${LY.H}" width="${LY.W * z}" height="${LY.H * z}">`];
   for (const h of LY.heads) o.push(`<text x="${h.x}" y="${h.y}" font-size="${h.small ? 11 : 14}" font-weight="700" fill="${h.small ? '#78909c' : '#37474f'}">${esc(h.small && h.w ? fit(h.t, h.w, 11) : h.t)}</text>`);
   for (const id of LY.containers) {
-    const n = NODE[id], p = P[id], bag = n.c === 'TamperEvidentBag', big = !bag;
+    const n = NODE[id], p = P[id], bag = !!D(n.c).small, big = !bag;
     const fs = big ? 16 : 12;
     o.push(`<g class="node ${bag ? 'bag' : ''} ${stateOf(id)} ${sel === id ? 'sel' : ''}" data-id="${esc(id)}"><rect class="body" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="9" fill="${fill(id)}" fill-opacity="${maxRisk[id] !== undefined && !opt.byType ? .5 : 1}"/>`
       + glyph(n.c, p.x + 8, p.y + 8) + `<text x="${p.x + 30}" y="${p.y + 22}" font-size="${fs}" font-weight="700" fill="#263238">${esc(fit(n.name, p.w - 60, fs))}<tspan font-size="11" font-weight="400" fill="#607d8b" dx="8">${esc(n.sub)}</tspan></text></g>`);
@@ -707,7 +690,7 @@ function diagramSvg(opt = {}) {
   }
   for (const id of LY.cards) {
     const n = NODE[id], p = P[id];
-    const person = n.c === 'Person', wallet = n.c === 'Wallet';
+    const person = n.c === ROLES.actor, wallet = n.c === ROLES.asset;
     const fs = person ? 14 : 12;
     let s = `<g class="node ${stateOf(id)} ${sel === id ? 'sel' : ''}" data-id="${esc(id)}"><title>${esc(n.name + (n.sub && !wallet ? ' - ' + n.sub : '') + (n.imgmatch && n.imgmatch !== 'exact' ? ' (the picture shows a similar model)' : ''))}</title><rect class="body" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${wallet ? 8 : 6}" fill="${fill(id)}"/>`;
     const pic = n.img ? p.w - 38 : p.w;
@@ -735,9 +718,10 @@ function diagramSvg(opt = {}) {
 function legendHtml(withOutline, byType) {
   const line = k => `<span class="lg"><svg width="30" height="8"><line x1="0" y1="4" x2="30" y2="4" stroke="${EDGE[k].c}" stroke-width="2" ${EDGE[k].d ? `stroke-dasharray="${EDGE[k].d}"` : ''}/></svg>${EDGE[k].t}</span>`;
   const sw = c => `<span class="swatch" style="background:${c};border-width:1px;border-color:#90a4ae"></span>`;
-  const DARK = { Seed: BACKUP_FILL.seed, Descriptor: BACKUP_FILL.descriptor, Passphrase: BACKUP_FILL.secret, PinPassword: BACKUP_FILL.secret, Plan: BACKUP_FILL.plan, TamperEvidentBag: TYPE_FILL.BagStrip };
-  const typeKey = c => `<span class="lg">${sw(TYPE_FILL[c])}${DARK[c] ? ' / ' + sw(DARK[c]) : ''} ${esc(c === 'TamperEvidentBag' ? CLASSES[c][0] + ' / ' + CLASSES.BagStrip[0].toLowerCase() : CLASSES[c][0])}</span>`;
-  let h = byType ? '<div><b>Fill</b> type of the entity; where there is a second, darker shade it is the backup of that type:' + Object.keys(TYPE_FILL).filter(c => !['Backup', 'BagStrip'].includes(c) && ST.nodes.some(n => n.c === c || (c === 'TamperEvidentBag' && n.c === 'BagStrip'))).map(typeKey).join('') + '</div>'
+  const shades = Object.assign({}, ...Object.values(DISPLAY.classes).map(d => d.shades || {}));
+  const dark = c => shades[(DATA.texts.subject_of || {})[c]] || null;
+  const typeKey = c => `<span class="lg">${sw(D(c).fill)}${dark(c) ? ' / ' + sw(dark(c)) : ''} ${esc(CLASSES[c] ? CLASSES[c][0] : c)}</span>`;
+  let h = byType ? '<div><b>Fill</b> type of the entity; where there is a second, darker shade it is the backup of that type:' + Object.keys(DISPLAY.classes).filter(c => c !== 'default' && !D(c).shades && D(c).sublane !== ALL_LANES_LAST && ST.nodes.some(n => n.c === c)).map(typeKey).join('') + '</div>'
     : '<div><b>Fill</b> highest risk of the threats on the entity:' + [0, 1, 2, 3, 4].map(chip).join('') + '<span class="chip na">none analysed</span></div>';
   h += '<div><b>Links</b>' + Object.keys(EDGE).map(line).join('') + '</div>';
   if (withOutline) {
@@ -794,7 +778,7 @@ const ancestors = ids => { const out = new Set(ids); for (const id of ids) { let
 function focusSet(v) {
   if (!v) return null;
   if (v.includes('#')) return ancestors([v.split('#')[0], v, ...ST.deps[v], ...ST.who[v]]);
-  if (NODE[v].c === 'Person') return ancestors(ST.access[v]);
+  if (NODE[v].c === ROLES.actor) return ancestors(ST.access[v]);
   const pols = NODE[v].policies.map((_, i) => `${v}#${i + 1}`);
   return ancestors([v, ...ST.deps[v], ...pols, ...ST.who[v]]);
 }
@@ -810,7 +794,7 @@ function showEntity(eid) {
     + rs.map(r => `<div class="item" data-id="${esc(r.id)}">${chip(r.R)} <b>${esc(r.tn)}</b><br><small>${esc(r.eff)}</small> <button data-act="detail">diagram</button></div>`).join('');
 }
 const inFocus = id => FOCUS && FOCUS.has(id);
-const focusable = id => NODE[id] && (NODE[id].c === 'Person' || NODE[id].c === 'Wallet');
+const focusable = id => NODE[id] && (NODE[id].c === ROLES.actor || NODE[id].c === ROLES.asset);
 function setFocus(id) {
   FOCUS = focusSet(id);
   $('#focus').value = id || '';
@@ -963,11 +947,11 @@ function sticky() {
 }
 // People against wallets: the rights they should have, what the intact setup gives them, and what threats do to it.
 function accessView() {
-  const R = DATA.rights, people = ST.nodes.filter(n => n.c === 'Person'), nm = id => entName[id] || id;
+  const R = DATA.rights, people = ST.nodes.filter(n => n.c === ROLES.actor), nm = id => entName[id] || id;
   const after = n => n === 0 ? 'at once' : `after ${n} blocks (about ${Math.max(1, Math.round(n / 144))} days)`;
   const who = (ids, me) => { const o = ids.filter(i => i !== me); return o.length ? 'with ' + o.map(nm).join(' and ') : 'alone'; };
   const used = new Set([...R.rights.map(r => r.wallet), ...R.extra.map(r => r.wallet), ...R.threats.map(t => t.wallet)]);
-  const wallets = ST.nodes.filter(n => n.c === 'Wallet' && (used.has(n.id) || !n.tripwire));
+  const wallets = ST.nodes.filter(n => n.c === ROLES.asset && (used.has(n.id) || !n.tripwire));
   const cell = (p, w) => {
     const out = [];
     let level = 0;
@@ -1003,12 +987,32 @@ $('#view-access').addEventListener('click', ev => {
   drawMain();
 });
 function show(tab) {
-  if (!['table', 'diagram', 'measures', 'access'].includes(tab)) tab = 'table';
-  for (const t of ['table', 'diagram', 'measures', 'access']) $('#view-' + t).classList.toggle('hidden', t !== tab);
+  const TABS = ['table', 'diagram', 'measures', 'access', 'faults'];
+  if (!TABS.includes(tab)) tab = 'table';
+  for (const t of TABS) $('#view-' + t).classList.toggle('hidden', t !== tab);
   document.querySelectorAll('nav a[data-tab]').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
   $('#newtab').href = '#' + tab;
-  if (tab === 'diagram') diagramView(); else if (tab === 'measures') measuresView(); else if (tab === 'access') accessView(); else sticky();
+  if (tab === 'diagram') diagramView(); else if (tab === 'measures') measuresView(); else if (tab === 'access') accessView(); else if (tab === 'faults') faultsView(); else sticky();
 }
+// Deductive view: the smallest sets of parts whose loss locks the people out, or whose leak lets an attacker in,
+// and the threats of the table that bring about such a set on their own.
+function faultsView() {
+  const nm = id => id.startsWith('control:') ? `control of ${entName[id.slice(8)] || id.slice(8)}` : (entName[id] || id);
+  const threatLinks = ids => ids.length ? ids.map(i => `<a href="#table" data-row="${esc(i)}">${esc(rowById[i] ? rowById[i].tn : i)} (${esc(rowById[i] ? rowById[i].en : '')})</a>`).join(', ') : '<i>no single threat of the catalog does this alone</i>';
+  const list = (sets, kind) => sets.length ? '<ol>' + sets.map(s => `<li><b>${s.parts.map(nm).map(esc).join(' + ')}</b>${s.parts.length === 1 ? ' <span class="chip r4">single point</span>' : ''}<br><small>${kind}: ${threatLinks(s.threats)}</small></li>`).join('') + '</ol>' : '<p>none</p>';
+  const D = DATA.deductive || [];
+  $('#view-faults').innerHTML = '<p>Read top-down: for every main wallet, the smallest sets of parts that must all fail (be destroyed, wrong or tampered with) before the people of a right have no way left to spend, and the smallest sets of parts an attacker must get hold of (disclosed, or controlled where a PIN or password guards it) to spend. Every set is derived from the same access tree the table uses; the threats named under a set bring the whole set about on their own.</p>'
+    + (D.length ? D.map(w => `<h2>${esc(entName[w.wallet] || w.wallet)}</h2>`
+      + w.loss.map(g => `<h3>Loss: ${g.people.length ? esc(g.people.map(nm).join(' and ')) + ' can no longer spend' : 'nobody can spend'} if all of these fail</h3>` + list(g.cut_sets, 'realised alone by')).join('')
+      + `<h3>Theft: an attacker spends with all of these</h3>` + list(w.theft, 'leaked alone by')).join('') : '<p>No deductive analysis in this file (run without what-if).</p>');
+}
+$('#view-faults').addEventListener('click', ev => {
+  const a = ev.target.closest('a[data-row]');
+  if (!a) return;
+  ev.preventDefault();
+  show('table'); location.hash = '#table';
+  $('#q').value = a.dataset.row; tableView();
+});
 function stats() {
   const m = DATA.meta, dist = [4, 3, 2, 1, 0].map(i => `${chip(i)} ${DATA.rows.filter(r => r.R === i).length}`).join(' ');
   $('#sub').innerHTML = `${DATA.rows.length} lines, ${DATA.na.length} not applicable, generated ${esc(m.generated)} (setup ${esc(m.setup_sha)}). Risk: ${dist}`;
@@ -1031,8 +1035,8 @@ function init() {
   const used = new Set(DATA.rows.map(r => r.c));
   $('#cls').innerHTML = opt('', 'all') + DATA.entities.map(e => e.class).filter((c, i, a) => a.indexOf(c) === i && used.has(c)).map(c => opt(c, CLASSES[c][1])).join('');
   const of = c => ST.nodes.filter(n => n.c === c).map(n => opt(n.id, esc(n.name))).join('');
-  const policyOptions = ST.nodes.filter(n => n.c === 'Wallet' && n.policies.length > 1).map(n => n.policies.map((t, i) => opt(`${n.id}#${i + 1}`, esc(`${n.name}: ${t}`))).join('')).join('');
-  $('#focus').innerHTML = opt('', 'nothing') + `<optgroup label="what a person can reach">${of('Person')}</optgroup><optgroup label="what a wallet depends on">${of('Wallet')}</optgroup>`
+  const policyOptions = ST.nodes.filter(n => n.c === ROLES.asset && n.policies.length > 1).map(n => n.policies.map((t, i) => opt(`${n.id}#${i + 1}`, esc(`${n.name}: ${t}`))).join('')).join('');
+  $('#focus').innerHTML = opt('', 'nothing') + `<optgroup label="what a person can reach">${of(ROLES.actor)}</optgroup><optgroup label="what a wallet depends on">${of(ROLES.asset)}</optgroup>`
     + (policyOptions ? `<optgroup label="what one spending policy depends on">${policyOptions}</optgroup>` : '');
   for (const id of ['q', 'minrisk', 'minsev', 'cls', 'grouped', 'explain', 'showna', 'rvfilter']) $('#' + id).addEventListener('input', tableView);
   $('#rvreset').addEventListener('click', () => { if (REVIEWED.size && confirm('Forget all reviewed marks?')) { REVIEWED.clear(); saveReviewed(); tableView(); } });

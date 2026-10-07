@@ -2,24 +2,24 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Bitcoin custody plan",
   "description": "Input of the threat analysis: a custody plan. Normative definition of SetupOntology.md. Referential integrity (ids exist, threshold <= signers, memory backups sit in a location of kind person, no bag cycles) is checked outside of this schema.",
-  "x-classes-description": "The classes of the ontology in display order: collection = key of the plan that holds them, parent = abstract superclass. The engine reads this table; SetupOntology.md and the catalogs are checked against it.",
+  "x-classes-description": "The classes of the ontology in display order: collection = key of the plan that holds them, parent = abstract superclass. Structural flags the engine reads: place = entities are kept at it (a location or a person); placed_by = the attribute that says where an entity is kept or runs (a one-key object such as stored_in is unwrapped); access_by / near = attributes of a place that list who can enter it and which places share area-wide events; catalog = lookup table and key columns; active = a part that acts, so that one tampered with is under the attacker's command; information = the entity is knowledge, not a thing: destroyed or faulty, it is of no use to the attacker either; inherits_status = gets what happens to its holder (software on a device); privacy = its disclosure reveals the holdings; credential = a secret that must be held or entered; singleton = the one entity of the class and its id. SetupOntology.md and the catalogs are checked against this table.",
   "x-classes": {
-    "Person": { "collection": "people" },
-    "Location": { "collection": "locations" },
-    "TamperEvidentBag": { "collection": "bags" },
-    "BagStrip": { "collection": "strips" },
-    "Device": { "abstract": true },
-    "SigningDevice": { "parent": "Device", "collection": "devices" },
+    "Person": { "collection": "people", "place": true, "privacy": true },
+    "Location": { "collection": "locations", "place": true, "placed_by": "part_of", "access_by": "access", "near": "near", "catalog": { "table": "LocationKinds.csv", "key": ["kind"] } },
+    "TamperEvidentBag": { "collection": "bags", "placed_by": "stored_in" },
+    "BagStrip": { "collection": "strips", "placed_by": "stored_in" },
+    "Device": { "abstract": true, "active": true, "placed_by": "stored_in" },
+    "SigningDevice": { "parent": "Device", "collection": "devices", "catalog": { "table": "SigningDeviceCatalog.csv", "key": ["vendor", "model"] } },
     "ComputingDevice": { "parent": "Device", "collection": "computing_devices" },
-    "Backup": { "collection": "backups" },
-    "Secret": { "abstract": true },
+    "Backup": { "collection": "backups", "placed_by": "stored_in", "catalog": { "table": "MetalBackupCatalog.csv", "key": ["product.vendor", "product.model"] } },
+    "Secret": { "abstract": true, "information": true },
     "Seed": { "parent": "Secret", "collection": "seeds", "credential": true },
     "Passphrase": { "parent": "Secret", "collection": "passphrases", "credential": true },
     "PinPassword": { "parent": "Secret", "collection": "pins", "credential": true },
     "Descriptor": { "parent": "Secret", "collection": "descriptors" },
-    "Wallet": { "collection": "wallets" },
-    "Coordinator": { "collection": "coordinators" },
-    "Plan": {},
+    "Wallet": { "collection": "wallets", "active": true, "privacy": true },
+    "Coordinator": { "collection": "coordinators", "placed_by": "runs_on", "inherits_status": true, "active": true },
+    "Plan": { "singleton": "@plan", "privacy": true, "information": true },
     "Signer": { "nested": true },
     "SpendingPolicy": { "nested": true },
     "BackupItem": { "nested": true }
@@ -190,11 +190,15 @@
         "comment": { "$ref": "#/$defs/comment" },
         "kind": { "description": "mobile: always carried by a person. desktop: stands in a location. laptop: either.", "enum": ["mobile", "laptop", "desktop"] },
         "product": { "type": "string", "description": "Operating system or model, informational." },
-        "online": { "description": "Connected to the internet (default true). false for an air-gapped computer.", "type": "boolean" },
+        "online": { "description": "Connected to the internet (default true). false for an air-gapped computer.", "type": "boolean", "default": true },
         "use": { "description": "regular: used so often (at least yearly) that it is powered on and a defect noticed anyway.", "enum": ["regular"] },
         "stores_descriptors": { "$ref": "#/$defs/idList", "x-ref": "Descriptor" },
         "stored_in": { "$ref": "#/$defs/storedIn" }
-      }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "mobile" } } }, "then": { "properties": { "stored_in": { "required": ["person"] } }, "x-message": "a mobile device is carried by a person; use stored_in person" } },
+        { "if": { "properties": { "kind": { "const": "desktop" } } }, "then": { "properties": { "stored_in": { "not": { "required": ["person"] } } }, "x-message": "a desktop computer stands in a location, it is not carried" } }
+      ]
     },
 
     "seed": {
@@ -410,7 +414,11 @@
             "interval_days": { "type": "integer", "minimum": 1 }
           }
         }
-      }
+      },
+      "allOf": [
+        { "if": { "properties": { "medium": { "const": "memory" } } }, "then": { "properties": { "stored_in": { "required": ["person"] } }, "x-message": "a memory backup is in a person's mind; use stored_in person" } },
+        { "if": { "properties": { "medium": { "not": { "const": "memory" } } } }, "then": { "properties": { "stored_in": { "not": { "required": ["person"] } } }, "x-message": "only a memory backup is kept in a person" } }
+      ]
     }
   }
 }

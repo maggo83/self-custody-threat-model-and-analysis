@@ -46,8 +46,7 @@
           "minItems": 1,
           "items": { "$ref": "ThreatModelCommon.schema.json#/$defs/phase" }
         },
-        "applies_when": { "$ref": "ThreatModelCommon.schema.json#/$defs/conditions" },
-        "predicate": { "$ref": "ThreatModelCommon.schema.json#/$defs/predicate" },
+        "applies_when": { "description": "The threat is instantiated only on entities for which this holds.", "$ref": "ThreatModelCommon.schema.json#/$defs/expression" },
         "likelihood": {
           "description": "Base likelihood band (0 to 4, see Ratings.json) before the setup's measures. Without it the category default applies and the line is flagged for review. `ask` marks a value that depends on facts the owner must supply; the answer replaces the value.",
           "oneOf": [
@@ -63,7 +62,7 @@
             "additionalProperties": false,
             "required": ["when", "delta", "reason"],
             "properties": {
-              "when": { "$ref": "ThreatModelCommon.schema.json#/$defs/conditions" },
+              "when": { "$ref": "ThreatModelCommon.schema.json#/$defs/expression" },
               "delta": { "type": "integer", "minimum": -4, "maximum": 4 },
               "reason": { "type": "string" }
             }
@@ -87,8 +86,12 @@
         "on": { "$ref": "ThreatModelCommon.schema.json#/$defs/impactOn" },
         "kind": { "$ref": "ThreatModelCommon.schema.json#/$defs/impactKind" },
         "unless": {
-          "description": "Affected items that satisfy all of these conditions are not affected (e.g. a fireproof product in a fire).",
-          "$ref": "ThreatModelCommon.schema.json#/$defs/conditions"
+          "description": "Affected items for which this holds are not affected (e.g. a fireproof product in a fire).",
+          "$ref": "ThreatModelCommon.schema.json#/$defs/expression"
+        },
+        "only": {
+          "description": "Only affected items for which this holds are affected (e.g. a swapped bag: devices become controlled, backups tampered).",
+          "$ref": "ThreatModelCommon.schema.json#/$defs/expression"
         }
       }
     }

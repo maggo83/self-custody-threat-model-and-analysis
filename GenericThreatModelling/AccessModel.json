@@ -1,0 +1,147 @@
+{
+  "description": "How the engine reads a setup: derived attributes used by the actions, the impact selectors, the probes of the margin test, the goals, the rights and the travel rule. Everything here is domain knowledge; the engine only implements the forms (see AccessModel.schema.json).",
+  "goals": {
+    "spend": { "action": "R-ACCESS-WALLET", "param": "wallet" },
+    "policy": { "action": "R-SATISFY-POLICY", "params": { "wallet": "$wallet", "policy": "$policy" } },
+    "descriptor": { "action": "R-ACCESS-DESCRIPTOR", "param": "wallet" },
+    "know": { "action": "R-OBTAIN-SECRET", "param": "secret" }
+  },
+  "asset": {
+    "class": "Wallet",
+    "main_when": { "path": "tripwire.enabled", "not_in": [true] },
+    "policies": "spending_policies[]",
+    "policy_class": "SpendingPolicy",
+    "quorum": { "members": "signers[].seed.devices[]", "threshold": "threshold", "member_class": "Signer", "signer_devices": "seed.devices[]" }
+  },
+  "actor": {
+    "class": "Person",
+    "rights": "may_spend",
+    "with": "with",
+    "after": "after_blocks",
+    "assets": "wallets",
+    "owner_role": "owner"
+  },
+  "travel": {
+    "between": "Location",
+    "no_travel_when": { "path": "catalog.remote", "in": ["yes"] },
+    "immediate_policies_only": true
+  },
+  "selectors": {
+    "self": { "self": true },
+    "items": { "self": true },
+    "contents": { "placed_in": "$self" },
+    "intrusion_contents": { "placed_in": "$self", "hidden": { "path": "catalog.concealment", "matches": "^secret" }, "visible_from_above": true },
+    "area_contents": { "placed_in": "$self", "area": true },
+    "knowledge": { "placed_in": "$self", "where": { "path": "medium", "in": ["memory"] } },
+    "access": { "placed_in": "$self.reach" },
+    "loaded_seeds": { "path": "seeds" },
+    "coordinated_wallets": { "path": "coordinators[].holds" },
+    "same_model_devices": { "peers": ["vendor", "model"] },
+    "same_vendor_devices": { "peers": ["vendor"] },
+    "wallets": { "path": "wallets" },
+    "protects": { "path": "protects" }
+  },
+  "margin_probes": [
+    { "class": "Person", "lose": [{ "on": "self", "kind": "destroyed" }], "leak": [{ "on": "access", "kind": "disclosed" }, { "on": "knowledge", "kind": "disclosed" }] },
+    { "class": "Location", "lose": [{ "on": "contents", "kind": "destroyed" }], "leak": [{ "on": "contents", "kind": "disclosed" }] },
+    { "class": "Device", "lose": [{ "on": "self", "kind": "destroyed" }], "leak": [{ "on": "loaded_seeds", "kind": "disclosed" }] },
+    { "class": "Backup", "lose": [{ "on": "self", "kind": "destroyed" }], "leak": [{ "on": "self", "kind": "disclosed" }] },
+    { "class": "Seed", "lose": [{ "on": "self", "kind": "destroyed" }], "leak": [{ "on": "self", "kind": "disclosed" }] },
+    { "class": "Passphrase", "lose": [{ "on": "self", "kind": "destroyed" }], "leak": [{ "on": "self", "kind": "disclosed" }] },
+    { "class": "PinPassword", "lose": [{ "on": "self", "kind": "destroyed" }], "leak": [{ "on": "self", "kind": "disclosed" }] }
+  ],
+  "checks": [
+    { "class": "Wallet", "level": "error", "when": { "exists": "spending_policies[]", "as": "$p", "where": { "path": "$p.signers[]", "count": true, "lt": "$p.threshold" } }, "message": "wallet {id}: a threshold exceeds the number of signers of its policy" },
+    { "class": "Descriptor", "level": "error", "when": { "path": "carriers[]", "nonempty": false }, "message": "descriptor {id}: kept nowhere; it needs a backup copy, a registration on a device or a coordinator that has it" },
+    { "class": "Wallet", "level": "error", "when": { "path": "descriptors[]", "count": true, "gt": 1 }, "message": "wallet {id} has several descriptors ({descriptors}); a wallet has at most one" },
+    { "class": "Wallet", "level": "error", "when": { "all": [{ "path": "needs_registration[]", "nonempty": true }, { "path": "descriptor", "nonempty": false }] }, "message": "wallet {id} has several signers or a custom definition and needs a descriptor" },
+    { "class": "Person", "level": "error", "when": { "exists": "may_spend[]", "as": "$r", "where": { "path": "$r.with[]", "contains": "$self" } }, "message": "person {id} may_spend: the person is listed in their own `with`" },
+    { "class": "Wallet", "level": "error", "when": { "all": [{ "path": "tripwire.enabled", "not_in": [true] }, { "not": { "exists": "Person", "as": "$p", "where": { "exists": "$p.may_spend[]", "as": "$r", "where": { "any": [{ "path": "$r.wallets[]", "nonempty": false }, { "path": "$r.wallets[]", "contains": "$self" }] } } } }] }, "message": "wallet {id}: nobody may spend it; give a person a `may_spend` entry" },
+    { "class": "SigningDevice", "level": "error", "when": { "all": [{ "path": "stores_descriptors[]", "nonempty": true }, { "path": "catalog.descriptor_registration", "in": ["none", "per_transaction"] }] }, "message": "device {id} ({vendor} {model}) cannot keep a registered descriptor (catalog: {catalog.descriptor_registration})" },
+    { "class": "Location", "level": "warning", "when": { "path": "access[]", "nonempty": false }, "message": "location {id}: no access list; nobody can reach it" },
+    { "class": "SigningDevice", "level": "warning", "when": { "path": "catalog", "nonempty": false }, "message": "device {id}: {vendor} / {model} is not in the device catalog" },
+    { "class": "Backup", "level": "warning", "when": { "all": [{ "path": "product", "nonempty": true }, { "path": "catalog", "nonempty": false }] }, "message": "backup {id}: product {product.vendor} / {product.model} is not in the backup catalog" },
+    { "class": "Seed", "level": "warning", "when": { "path": "copies[]", "nonempty": false }, "message": "seed {id} has no backup copy" },
+    { "class": "Passphrase", "level": "warning", "when": { "path": "copies[]", "nonempty": false }, "message": "passphrase {id} has no backup copy" },
+    { "class": "PinPassword", "level": "warning", "when": { "path": "copies[]", "nonempty": false }, "message": "pin {id} has no backup copy" },
+    { "class": "Wallet", "level": "warning", "when": { "path": "coordinators[]", "nonempty": false }, "message": "wallet {id}: no coordinator has its descriptor, so nobody can build transactions for it; list the descriptor in `stores_descriptors` of a coordinator" },
+    { "class": "Coordinator", "level": "warning", "when": { "path": "runs_on.online", "in": [false] }, "message": "coordinator {id} runs on {runs_on}, which is offline; a coordinator queries the network" },
+    { "class": "SigningDevice", "level": "warning", "when": { "all": [{ "path": "registration_wallets[]", "nonempty": true }, { "path": "catalog.descriptor_registration", "not_in": ["registers", "per_transaction", "none"] }] }, "message": "device {id} ({vendor} {model}) signs for {registration_wallets}; the catalog does not say whether it registers descriptors, so it counts as not registering" },
+    { "class": "SigningDevice", "level": "warning", "when": { "all": [{ "path": "registration_wallets[]", "nonempty": true }, { "path": "catalog.descriptor_registration", "in": ["per_transaction"] }, { "not": { "forall": "$self.registration_wallets[]", "as": "$w", "where": { "path": "$w.descriptor.places[]", "contains": "$self.root" } } }] }, "message": "device {id} ({vendor} {model}) signs for {registration_wallets} and needs the descriptor loaded for every signing instead of a registered one; it counts as not checking the policy unless the descriptor is kept where the device is and a practice M-P-LOAD-DESCRIPTOR covers it" },
+    { "class": "SigningDevice", "level": "warning", "when": { "all": [{ "path": "registration_wallets[]", "nonempty": true }, { "path": "catalog.descriptor_registration", "in": ["none"] }] }, "message": "device {id} ({vendor} {model}) signs for {registration_wallets} but does not keep a registered descriptor (catalog: none); it cannot check the wallet policy before signing" },
+    { "class": "SigningDevice", "level": "warning", "when": { "all": [{ "path": "catalog.descriptor_registration", "in": ["registers"] }, { "path": "unregistered_wallets[]", "nonempty": true }] }, "message": "device {id} ({vendor} {model}) supports registering descriptors but has none registered for {unregistered_wallets}" }
+  ],
+  "derived": {
+    "Wallet.descriptor": { "select": "Descriptor", "where": { "path": "$e.wallet", "eq": "$self" }, "single": true },
+    "Wallet.descriptors": { "select": "Descriptor", "where": { "path": "$e.wallet", "eq": "$self" } },
+    "Wallet.all_signers": { "path": "spending_policies[].signers[]", "class": "Signer" },
+    "Wallet.needs_registration": { "select": "Wallet", "where": { "all": [{ "path": "$e", "eq": "$self" }, { "any": [{ "path": "$e.definition", "in": ["custom"] }, { "path": "$e.all_signers", "count": true, "gt": 1 }] }] } },
+    "Wallet.coordinators": {
+      "select": "Coordinator",
+      "where": { "any": [
+        { "path": "$e.stores_descriptors", "contains": "$self.descriptor" },
+        { "all": [{ "path": "$self.definition", "in": ["default"] }, { "forall": "$self.all_signers", "as": "$sg", "class": "Signer", "where": { "path": "$sg.seed.devices", "contains": "$e.runs_on" } }] }
+      ] }
+    },
+    "Wallet.immediate_policy": { "path": "spending_policies[]", "as": "$p", "class": "SpendingPolicy", "where": { "path": "$p.delay_blocks", "eq": 0 }, "single": true },
+    "Wallet.deps": { "dependencies": true },
+    "Wallet.secrets": { "path": "deps[]", "as": "$x", "where": { "path": "$x.class", "in": ["Seed", "Passphrase", "PinPassword"] } },
+    "Wallet.secret_places": { "roots_of": "secrets[].carriers[]" },
+    "Wallet.main": { "select": "Wallet", "where": { "all": [{ "path": "$e", "eq": "$self" }, { "path": "$e.tripwire.enabled", "not_in": [true] }] } },
+    "Signer.wallets": {
+      "select": "Wallet",
+      "where": { "exists": "$e.spending_policies[].signers[]", "as": "$sg", "where": { "all": [{ "path": "$sg.seed", "eq": "$self.seed" }, { "any": [{ "all": [{ "path": "$sg.passphrase", "nonempty": false }, { "path": "$self.passphrase", "nonempty": false }] }, { "path": "$sg.passphrase", "eq": "$self.passphrase" }] }] } }
+    },
+    "SpendingPolicy.open_at_once": { "select": "Wallet", "where": { "path": "$self.delay_blocks", "eq": 0 } },
+    "Secret.copies": { "select": "Backup", "as": "$b", "each": "items[]", "item": "$item", "where": { "path": "$item.subject.*", "contains": "$self" }, "yield": { "backup": "$b", "item": "$item" } },
+    "Plan.copies": { "select": "Backup", "as": "$b", "each": "items[]", "item": "$item", "where": { "path": "$item.subject.plan", "in": [true] }, "yield": { "backup": "$b", "item": "$item" } },
+    "Secret.carriers": { "union": [
+      { "path": "copies[].backup" },
+      { "path": "devices[]" },
+      { "select": "Device", "where": { "path": "$e.stores_descriptors", "contains": "$self" } },
+      { "select": "Coordinator", "where": { "path": "$e.stores_descriptors", "contains": "$self" } }
+    ] },
+    "Plan.carriers": { "path": "copies[].backup" },
+    "Secret.places": { "roots_of": "carriers[]" },
+    "Secret.protects": { "union": [
+      { "select": "Device", "where": { "path": "$e.pin", "eq": "$self" } },
+      { "select": "Coordinator", "where": { "path": "$e.password", "eq": "$self" } },
+      { "select": "Backup", "where": { "path": "$e.items[].encrypted_with[].*", "contains": "$self" } }
+    ] },
+    "Secret.wallets": { "dependents": "Wallet" },
+    "Seed.signers": { "select": "Wallet", "as": "$w", "each": "spending_policies[].signers[]", "item": "$sg", "where": { "path": "$sg.seed", "eq": "$self" }, "yield": "$sg", "class": "Signer" },
+    "Seed.counterparts": { "path": "signers[].passphrase" },
+    "Passphrase.signers": { "select": "Wallet", "as": "$w", "each": "spending_policies[].signers[]", "item": "$sg", "where": { "path": "$sg.passphrase", "eq": "$self" }, "yield": "$sg", "class": "Signer" },
+    "Passphrase.counterparts": { "path": "signers[].seed" },
+    "PinPassword.counterparts": { "select": "Device", "where": { "path": "$e.pin", "eq": "$self" } },
+    "Descriptor.devices": { "select": "Device", "where": { "path": "$e.stores_descriptors", "contains": "$self" } },
+    "Descriptor.coordinators": { "select": "Coordinator", "where": { "path": "$e.stores_descriptors", "contains": "$self" } },
+    "Device.seeds": { "select": "Seed", "where": { "path": "$e.devices", "contains": "$self" } },
+    "Device.coordinators": { "select": "Coordinator", "where": { "path": "$e.runs_on", "eq": "$self" } },
+    "Device.holds": { "union": [{ "path": "seeds[]" }, { "path": "stores_descriptors[]" }] },
+    "Device.enclosing_bags": { "containers": "TamperEvidentBag" },
+    "Device.places": { "roots_of": "id" },
+    "Device.wallets": { "dependents": "Wallet" },
+    "Device.registration_wallets": { "dependents": "Wallet", "as": "$w", "where": { "path": "$w.needs_registration", "nonempty": true } },
+    "Device.unregistered_wallets": { "path": "registration_wallets[]", "as": "$w", "where": { "not": { "path": "$self.stores_descriptors[]", "contains": "$w.descriptor" } } },
+    "Coordinator.wallets": { "dependents": "Wallet" },
+    "Coordinator.holds": { "select": "Wallet", "as": "$w", "where": { "path": "$w.coordinators", "contains": "$self" }, "yield": "$w" },
+    "Backup.enclosing_bags": { "containers": "TamperEvidentBag" },
+    "Backup.wallets": { "dependents": "Wallet" },
+    "Backup.subjects": { "path": "items[].subject.*" },
+    "Backup.holds": { "union": [{ "path": "items[].subject.*", "as": "$x", "where": { "path": "$x.class", "nonempty": true } }, { "select": "Plan", "where": { "path": "$e.carriers[]", "contains": "$self" } }] },
+    "TamperEvidentBag.bags": { "inside": "TamperEvidentBag" },
+    "TamperEvidentBag.devices": { "inside": "Device" },
+    "TamperEvidentBag.backups": { "inside": "Backup" },
+    "BagStrip.bag": { "select": "TamperEvidentBag", "where": { "path": "$e.strip", "eq": "$self" }, "single": true },
+    "Location.bags": { "inside": "TamperEvidentBag" },
+    "Location.devices": { "inside": "Device" },
+    "Location.backups": { "inside": "Backup" },
+    "Location.is_physical": { "select": "Location", "where": { "all": [{ "path": "$e", "eq": "$self" }, { "path": "$e.catalog.remote", "not_in": ["yes"] }] } },
+    "Location.is_cloud": { "select": "Location", "where": { "all": [{ "path": "$e", "eq": "$self" }, { "path": "$e.kind", "in": ["cloud"] }] } },
+    "Person.reach": { "reach": true },
+    "Plan.people": { "select": "Person" },
+    "Plan.locations": { "select": "Location" },
+    "Plan.wallets": { "select": "Wallet" }
+  }
+}

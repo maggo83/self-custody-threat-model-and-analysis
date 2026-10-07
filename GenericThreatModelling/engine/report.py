@@ -4,10 +4,11 @@ import base64
 import json
 from pathlib import Path
 
+import access
 import loader
-import effects
+import outcomes
 import rating
-from model import PERSON_PLACE, Setup
+from graph import Setup
 import ontology
 from ontology import is_a
 
@@ -17,17 +18,9 @@ IMAGES = loader.LOOKUPS / "DeviceImages" / "thumb"
 CLASS_ORDER = ontology.CONCRETE
 
 
-def secrets_in(S, eid):
-    """What one finds by opening a backup or holding a device."""
-    c = S.cls(eid)
-    if c == "Backup":
-        out = set()
-        for item in S.ent(eid)["items"]:
-            out |= {"@plan" if k == "plan" else v for k, v in item["subject"].items()}
-        return out
-    if is_a(c, "Device"):
-        return set(S.seeds_on(eid)) | set(S.ent(eid).get("stores_descriptors", [])) | {d for co in S.coordinators_on(eid) for d in S.ent(co).get("stores_descriptors", [])}
-    return set()
+def holds(S, eid):
+    """What one finds by opening a backup or holding a device: the `holds` derived attribute of its class."""
+    return {v for v in S.values(eid, "holds") if isinstance(v, str) and v in S.by_id}
 
 
 def device_images(S):
@@ -43,18 +36,19 @@ def device_images(S):
     return pictures, of
 
 
-def spendable(S, pid):
+def spendable(S, ev, pid):
     """The wallets and spending policies (`wallet#n`) that the person can satisfy alone, or together with the others of a right to that wallet, whatever the delay."""
     out = set()
-    tries = [(None, {pid})] + [(r["wallet"], set(r["people"])) for r in S.rights() if pid in r["people"]]
+    tries = [(None, {pid})] + [(r["wallet"], set(r["people"])) for r in ev.rights() if pid in r["people"]]
+    policies = S.model["asset"]["policies"][:-2]
     for only, group in tries:
-        owner = effects.Owner(S, effects.State(), True, group)
+        agent = access.People(S, access.State(), group, True)
         for wal in S.of("Wallet"):
-            if only and wal["id"] != only or not owner.descriptor_ok(wal["id"]):
+            if only and wal["id"] != only:
                 continue
-            for i, pol in enumerate(wal["spending_policies"], 1):
-                if sum(owner.signer_ok(sg) for sg in pol["signers"]) >= pol["threshold"]:
-                    out |= {wal["id"], f"{wal['id']}#{i}"}
+            for i in range(len(wal[policies])):
+                if access.value(access.spend_tree(S, wal["id"], i), agent) < access.INF:
+                    out |= {wal["id"], f"{wal['id']}#{i + 1}"}
     return out
 
 
@@ -65,65 +59,47 @@ def implicit_id(wid):
 def coordinator_holds(S, w, cid):
     """The descriptors a coordinator has: kept explicitly, or derived on its host from the seeds that are there (implicit)."""
     kept, out = S.ent(cid).get("stores_descriptors", []), []
-    for wal in S.of("Wallet"):
-        did = wal.get("descriptor")
+    for wid in S.values(cid, "holds"):
+        did = S.values(wid, "descriptor")
+        did = did[0] if did else None
         if did in kept:
             out.append({"id": did, "name": w.name(did), "c": "Descriptor", "tip": f"descriptor {w.name(did)} is kept by this coordinator"})
-        elif S.has_descriptor(cid, wal["id"]):
-            out.append({"id": did or implicit_id(wal["id"]), "name": w.name(did) if did else f"Descriptor of {w.name(wal['id'])}", "c": "Descriptor", "implicit": True,
-                        "tip": f"the descriptor of {w.name(wal['id'])} is derived on this host from the seeds that are there"})
+        else:
+            out.append({"id": did or implicit_id(wid), "name": w.name(did) if did else f"Descriptor of {w.name(wid)}", "c": "Descriptor", "implicit": True,
+                        "tip": f"the descriptor of {w.name(wid)} is derived on this host from the seeds that are there"})
     return out
 
 
-def structure(S, w, images=False):
+def structure(S, ev, w, texts, images=False):
     """The setup as plain data for the diagram: cards, links, and what each person can reach."""
-    def sub(c, e):
-        if c == "SigningDevice":
-            return f"{e['vendor']} {e['model']}"
-        if c == "ComputingDevice":
-            return e["kind"] + (f", {e['product']}" if "product" in e else "")
-        if c == "Backup":
-            return e["medium"].replace("_", " ") + (f", {e['product']['vendor']} {e['product']['model']}" if "product" in e else "")
-        if c == "Location":
-            return e["kind"].replace("_", " ")
-        if c == "Person":
-            return ", ".join(e.get("roles", []))
-        if c == "Coordinator":
-            return e.get("product", "")
-        return ""
+    subtitles = texts.get("subtitle", {})
     nodes = []
     pictures, of = device_images(S) if images else ({}, {})
     for eid, (c, e) in S.by_id.items():
-        if eid.startswith(PERSON_PLACE):
-            continue
-        node = {"id": eid, "c": c, "name": w.name(eid), "sub": sub(c, e)}
+        node = {"id": eid, "c": c, "name": w.name(eid), "sub": loader.message(S, eid, subtitles[c]).replace("?", "").strip(" ,") if c in subtitles else ""}
         if eid in of:
             node["img"], node["imgmatch"] = of[eid]["file"], of[eid]["match"]
         if is_a(c, "Device"):
             node["holds"] = [{"id": s, "name": w.name(s), "c": S.cls(s),
-                              "tip": f"{'seed' if S.cls(s) == 'Seed' else 'descriptor'} {w.name(s)} is {'loaded' if S.cls(s) == 'Seed' else 'stored'} on this device"}
-                             for s in S.seeds_on(eid) + list(e.get("stores_descriptors", []))]
+                              "tip": f"{texts['classes'][S.cls(s)][0].lower()} {w.name(s)} is on this device"}
+                             for s in S.values(eid, "holds")]
         if c == "Coordinator":
             node["holds"] = coordinator_holds(S, w, eid)
-        if c == "Person":
+        if is_a(c, S.model["actor"]["class"]):
             node["may"] = w.rights_of(eid)
         if c == "Backup":
             node["subjects"] = sorted({k for item in e["items"] for k in item["subject"]})
-        if c == "Location" and e.get("part_of"):
-            node["in"] = e["part_of"]
-        elif "stored_in" in e:
-            where = e["stored_in"]
-            node["in"] = where["person"] if "person" in where else next(iter(where.values()))
-        elif c == "Coordinator" and "runs_on" in e:
-            node["in"] = e["runs_on"]
+        container = S.container(eid)
+        if container:
+            node["in"] = container
         if c == "Wallet":
             node["custom"] = e["definition"] == "custom"
-            node["tripwire"] = bool(e.get("tripwire", {}).get("enabled"))
+            node["tripwire"] = not ev.is_main(eid)
             node["policies"] = [f"{p['threshold']} of {len(p['signers'])}, " + (f"after {p['delay_blocks']} blocks" if p["delay_blocks"] else "at once")
                                 for p in e["spending_policies"]]
         nodes.append(node)
     nodes += [{"id": implicit_id(wal["id"]), "c": "Descriptor", "name": f"Descriptor of {w.name(wal['id'])}", "sub": "derived from the keys", "implicit": True}
-              for wal in S.of("Wallet") if "descriptor" not in wal]
+              for wal in S.of("Wallet") if not S.values(wal["id"], "descriptor")]
     nodes.sort(key=lambda n: n["c"] == "Wallet" and n["tripwire"])
     edges = []
     for loc in S.of("Location"):
@@ -134,7 +110,8 @@ def structure(S, w, images=False):
                 edges.append([f"{wal['id']}#{i}", sg["seed"], "signer"])
                 if "passphrase" in sg:
                     edges.append([f"{wal['id']}#{i}", sg["passphrase"], "passphrase"])
-        edges.append([wal["id"], wal.get("descriptor", implicit_id(wal["id"])), "descriptor"])
+        d = S.values(wal["id"], "descriptor")
+        edges.append([wal["id"], d[0] if d else implicit_id(wal["id"]), "descriptor"])
         edges.append(["@plan", wal["id"], "plan"])
     for seed in S.of("Seed"):
         edges += [[seed["id"], d, "loaded"] for d in seed.get("devices", [])]
@@ -154,50 +131,43 @@ def structure(S, w, images=False):
                 edges.append([b["id"], "@plan" if k == "plan" else v, "content"])
             for alt in item.get("encrypted_with", []):
                 edges += [[b["id"], v, "encrypted"] for v in alt.values()]
-    access, spend = {}, {}
-    for p in S.ids_of("Person"):
+    acc, spend = {}, {}
+    for p in S.ids_of(S.model["actor"]["class"]):
         items = set(S.reachable_entities(p))
-        got = set().union(*[secrets_in(S, e) for e in items]) if items else set()
-        spend[p] = spendable(S, p)
-        access[p] = sorted({p} | {x for x in S.reach(p) if not x.startswith(PERSON_PLACE)} | items | got | spend[p])
+        got = set().union(*[holds(S, e) for e in items]) if items else set()
+        spend[p] = spendable(S, ev, p)
+        acc[p] = sorted({p} | {x for x in S.reach(p) if x in S.by_id} | items | got | spend[p])
     who, deps = {}, {}
     for wid in S.ids_of("Wallet"):
-        who[wid] = sorted({p for p in S.ids_of("Person") if wid in spend[p]} | {p for r in S.rights() if r["wallet"] == wid for p in r["people"]})
-        deps[wid] = sorted(S.deps(wid))
+        who[wid] = sorted({p for p in S.ids_of(S.model["actor"]["class"]) if wid in spend[p]} | {p for r in ev.rights() if r["wallet"] == wid for p in r["people"]})
+        deps[wid] = sorted(access.deps(S, wid))
         if len(S.ent(wid)["spending_policies"]) > 1:
             for i in range(len(S.ent(wid)["spending_policies"])):
-                who[f"{wid}#{i + 1}"] = sorted(p for p in S.ids_of("Person") if f"{wid}#{i + 1}" in spend[p])
-                deps[f"{wid}#{i + 1}"] = sorted(S.deps(wid, i))
-    return {"nodes": nodes, "edges": edges, "access": access, "who": who, "images": pictures, "deps": deps}
+                who[f"{wid}#{i + 1}"] = sorted(p for p in S.ids_of(S.model["actor"]["class"]) if f"{wid}#{i + 1}" in spend[p])
+                deps[f"{wid}#{i + 1}"] = sorted(access.deps(S, wid, i))
+    return {"nodes": nodes, "edges": edges, "access": acc, "who": who, "images": pictures, "deps": deps}
 
 
 def context(S, chain, wallets):
-    """Seeds, descriptors and spending policies that link the affected entities to the wallets."""
+    """Secrets and spending policies that link the affected entities to the wallets: the policies whose access trees
+    touch the chain, and the secrets whose own access trees do."""
     nodes, policies = set(), []
     for wid in wallets:
         if wid not in S.by_id or S.cls(wid) != "Wallet":
             continue
-        for i, p in enumerate(S.ent(wid)["spending_policies"], 1):
-            hit = False
-            for sg in p["signers"]:
-                parts = {sg["seed"]} | ({sg["passphrase"]} if "passphrase" in sg else set())
-                carriers = set(S.ent(sg["seed"]).get("devices", [])) | {b for b, _ in S.copies(sg["seed"])}
-                if "passphrase" in sg:
-                    carriers |= {b for b, _ in S.copies(sg["passphrase"])}
-                if (parts | carriers) & chain:
-                    nodes |= parts
-                    hit = True
-            if hit:
-                policies.append(f"{wid}#{i}")
-        d = S.ent(wid).get("descriptor")
-        if d and ({d} | {b for b, _ in S.copies(d)} | set(S.devices_storing(d))) & chain:
-            nodes.add(d)
+        for i in range(len(S.ent(wid)["spending_policies"])):
+            ents = access.entities(S, access.spend_tree(S, wid, i)) - {wid}
+            if ents & chain:
+                policies.append(f"{wid}#{i + 1}")
+                for s in ents:
+                    if is_a(S.cls(s), "Secret") and (s in chain or access.entities(S, access.goal(S, "know", secret=s)) & chain):
+                        nodes.add(s)
     return sorted(nodes - chain), policies
 
 
 class Writer:
-    def __init__(self, S, cat, texts):
-        self.S, self.cat, self.t = S, cat, texts
+    def __init__(self, S, ev, cat, texts):
+        self.S, self.ev, self.cat, self.t = S, ev, cat, texts
         self.ratings = cat.ratings
 
     def name(self, eid):
@@ -218,7 +188,7 @@ class Writer:
         """The rights a person takes part in, as sentences."""
         t = self.t["rights"]
         out = []
-        for r in self.S.rights():
+        for r in self.ev.rights():
             if pid not in r["people"]:
                 continue
             others = [p for p in sorted(r["people"]) if p != pid]
@@ -291,12 +261,8 @@ class Writer:
         if peers:
             lines.append(t["peers"].format(peers=self.names(peers)))
         for kind, ids in row.get("effects", {}).items():
-            if kind in self.t["effects"] and isinstance(ids, list):
+            if kind in self.t["effects"]:
                 lines.append(t["effect"].format(label=self.t["effects"][kind], entities=self.names(ids)))
-            elif kind in self.t["effects"]:
-                lines.append(self.t["effects"][kind] + ".")
-        for w, flags in row.get("effects", {}).get("wallet_flags", {}).items():
-            lines.append(t["flag"].format(wallet=self.name(w), flags=", ".join(self.t["wallet_flags"][f] for f in flags)))
         for o in row["outcomes"]:
             exploit = self.t["exploit"][o["exploit"]]
             lines.append(t["outcome"].format(wallet=self.name(o["wallet"]), label=self.t["outcomes"][o["outcome"]].lower(),
@@ -389,8 +355,9 @@ def rights_view(result):
 
 
 def build_data(result, S, cat, images=False):
-    texts = loader.read_json(loader.DATA / "Texts.json")
-    w = Writer(S, cat, texts)
+    texts = loader.read_json(cat.data_dir / "Texts.json")
+    ev = outcomes.Evaluator(S)
+    w = Writer(S, ev, cat, texts)
     rows = []
     for r in result["rows"]:
         ents = r["entity"] if isinstance(r["entity"], list) else [r["entity"]]
@@ -400,7 +367,7 @@ def build_data(result, S, cat, images=False):
             if isinstance(v, list):
                 affected |= set(v)
         mech = {e for m in r["V"]["mechanisms"] for e in m["entities"]}
-        wallets = {o["wallet"] for o in r["outcomes"] if o["outcome"] != "none"} | set(r.get("effects", {}).get("wallet_flags", {}))
+        wallets = {o["wallet"] for o in r["outcomes"] if o["outcome"] != "none"}
         vx, vm, vpre, vres = w.vulnerability(r["V"], r["S"])
         ctx, pols = context(S, set(ents) | affected | set(r.get("common_cause", [])), wallets)
         rows.append({
@@ -414,28 +381,30 @@ def build_data(result, S, cat, images=False):
             "rel": {"target": ents, "affected": sorted(affected - set(ents)), "peers": r.get("common_cause", []),
                     "wallets": sorted(wallets), "mech": sorted(mech), "context": ctx, "policies": pols},
         })
-    order = [eid for c in CLASS_ORDER for eid in sorted(S.ids_of(c), key=lambda e: not S.is_main(e) if c == "Wallet" else False)]
+    order = [eid for c in CLASS_ORDER for eid in sorted(S.ids_of(c), key=lambda e: not ev.is_main(e) if c == "Wallet" else False)]
     return {
         "meta": result["meta"], "warnings": result["warnings"], "asks": result["asks"],
         "overrides": result.get("overrides", []),
         "rights": rights_view(result),
-        "texts": {k: texts[k] for k in ("classes", "risk_labels", "outcomes")},
+        "texts": {k: texts[k] for k in ("classes", "risk_labels", "outcomes", "display", "subject_of")},
+        "roles": {"actor": S.model["actor"]["class"], "asset": S.model["asset"]["class"]},
         "scales": {k: {"description": v["description"], "bands": [b.get("probability") or b["label"] for b in v["bands"]]}
                    for k, v in cat.ratings["scales"].items()},
         "risk_matrix": cat.ratings["risk_matrix"]["values"], "residual": cat.ratings["residual_likelihood"]["formula"],
         "entities": [{"id": e, "name": w.name(e), "class": S.cls(e)} for e in order],
         "rows": rows, "na": [w.not_applicable(n) for n in result["not_applicable"]],
         "measures": measures_view(result, S, cat, w, texts, rows),
-        "structure": structure(S, w, images),
+        "deductive": result.get("deductive", []),
+        "structure": structure(S, ev, w, texts, images),
     }
 
 
-def render_html(result, setup_path, images=False):
-    cat = loader.Catalogs()
+def render_html(result, setup_path, images=False, cat=None):
+    cat = cat or loader.Catalogs()
     data = build_data(result, Setup(loader.read_json(setup_path), cat), cat, images)
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     return TEMPLATE.read_text(encoding="utf-8").replace("__DATA__", payload)
 
 
-def write_html(result, setup_path, path, images=False):
-    Path(path).write_text(render_html(result, setup_path, images), encoding="utf-8")
+def write_html(result, setup_path, path, images=False, cat=None):
+    Path(path).write_text(render_html(result, setup_path, images, cat), encoding="utf-8")

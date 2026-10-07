@@ -22,17 +22,16 @@ ENGINE = HERE.parent / "engine"
 sys.path.insert(0, str(ENGINE))
 
 import analyze      # noqa: E402
-import effects      # noqa: E402
+import access       # noqa: E402
 import feedback     # noqa: E402
+import graph        # noqa: E402
 import loader       # noqa: E402
-import model        # noqa: E402
 import ontology     # noqa: E402
-import vocab        # noqa: E402
-import ontology     # noqa: E402
-import predicates   # noqa: E402
+import outcomes as outc  # noqa: E402
 import rating       # noqa: E402
 import report       # noqa: E402
-from model import Setup  # noqa: E402
+import vocab        # noqa: E402
+from graph import INF, Setup  # noqa: E402
 
 SETUP = HERE / "TestSetup.json"
 CLI = ENGINE / "threat_analysis.py"
@@ -45,7 +44,7 @@ def setUpModule():
     BASE["cat"] = loader.Catalogs()
     BASE["data"] = json.loads(SETUP.read_text())
     BASE["S"] = Setup(BASE["data"], BASE["cat"])
-    BASE["ev"] = effects.Evaluator(BASE["S"])
+    BASE["ev"] = outc.Evaluator(BASE["S"])
     BASE["result"] = analyze.analyze(SETUP)
     BASE["rows"] = {r["id"]: r for r in BASE["result"]["rows"]}
     BASE["na"] = {(x["threat"], x["entity"]): x["reason"] for x in BASE["result"]["not_applicable"]}
@@ -97,6 +96,45 @@ def effect(row, key):
     return set(row.get("effects", {}).get(key, []))
 
 
+STATUS = {"lost": "destroyed", "blocked": "unavailable", "secret_known": "disclosed", "disclosed": "disclosed", "controlled": "controlled", "tampered": "tampered", "faulty": "faulty"}
+
+
+def state(S=None, **sets):
+    """A state with statuses on entities, named as the old state sets were (lost, blocked, disclosed, controlled, tampered,
+    secret_known); what inherits the status of its holder gets it too."""
+    st = access.State()
+    for k, ids in sets.items():
+        for e in ids:
+            access.hit(S or BASE["S"], st, e, STATUS[k])
+    return st
+
+
+def can(S, st, action, strict=True, people=None, **args):
+    """Whether the people (default: everybody) complete an action of the catalog in the state."""
+    return access.value(access.tree(S, action, args), access.People(S, st, people, strict)) < INF
+
+
+def obtain(S, st, secret, strict=True, people=None):
+    return can(S, st, "R-OBTAIN-SECRET", strict, people, secret=secret)
+
+
+def descriptor_ok(S, st, wallet, strict=True, people=None):
+    return can(S, st, "R-ACCESS-DESCRIPTOR", strict, people, wallet=wallet)
+
+
+def descriptor_copy(S, st, wallet, strict=True, people=None):
+    return can(S, st, "R-RECOVER-DESCRIPTOR", strict, people, wallet=wallet)
+
+
+def theft(S, st, wallet):
+    return access.theft_delay(S, st, wallet) is not None
+
+
+def present(S, mechanism, eid):
+    """Whether a structural mechanism is in place on the entity (its present_when expression)."""
+    return S.holds(eid, BASE["cat"].mechanisms[mechanism]["present_when"])
+
+
 class Base(unittest.TestCase):
     cat = property(lambda self: BASE["cat"])
     S = property(lambda self: BASE["S"])
@@ -131,13 +169,18 @@ class SingleSource(Base):
         self.assertEqual({n for n, c in table.items() if not c.get("nested") or n in drawn} - drawn, set(), "classes missing in the diagram")
 
     def test_every_class_has_a_text_and_a_picture_in_the_report(self):
-        import re
+        texts = json.loads((HERE.parent / "Texts.json").read_text())
+        concrete = set(ontology.CONCRETE)
+        self.assertEqual(concrete - set(texts["classes"]), set())
+        display = texts["display"]["classes"]
+        self.assertEqual(concrete - set(display), set(), "every class is drawn with its own lane, colours and glyph")
+        for c, d in display.items():
+            self.assertEqual(set(d) >= {"lane", "fill", "neutral", "glyph"}, True, c)
+            self.assertIn(d["lane"], texts["display"]["lanes"], c)
+        self.assertIn("default", display, "a class added through data alone is drawn with the default")
         html = (HERE.parent / "engine" / "report.template.html").read_text(encoding="utf-8")
-        concrete = set(ontology.CONCRETE) - {"Plan"}
-        for table in ("NEUTRAL", "TYPE_FILL", "GLYPH"):
-            body = re.search(rf"const {table} = \{{(.*?)\n?\}};", html, re.S).group(1)
-            self.assertEqual(concrete - set(re.findall(r"(\w+):", body)), set(), table)
-        self.assertEqual(concrete - set(json.loads((HERE.parent / "Texts.json").read_text())["classes"]), set())
+        for c in concrete:
+            self.assertNotRegex(html, rf"'{c}'", f"the page must not name the class {c}; it reads the display table")
 
     def test_references_are_checked_against_the_classes_marked_in_the_schema(self):
         def point(d):
@@ -160,30 +203,41 @@ class SingleSource(Base):
     def test_outcomes_and_effects_have_ratings_and_texts(self):
         texts = json.loads((HERE.parent / "Texts.json").read_text())
         self.assertEqual(set(texts["outcomes"]), set(self.cat.ratings["outcomes"]))
-        self.assertEqual(set(effects.State.SETS) - set(texts["effects"]), set())
+        self.assertEqual(set(vocab.KINDS) - set(vocab.LEAK) - set(texts["effects"]), set(), "every status has a text")
         emitted = {o["outcome"] for r in BASE["result"]["rows"] for o in r["outcomes"]}
         self.assertEqual(emitted - set(texts["outcomes"]), set())
+        named = {r["outcome"] for r in self.cat.ratings["outcome_rules"]["rules"]}
+        by_asset = {k for k, v in self.cat.ratings["outcome_by_asset"].items() if isinstance(v, list)}
+        self.assertEqual(named - set(self.cat.ratings["outcomes"]) - by_asset, set(), "every rule names a known outcome")
 
-    def test_the_engine_implements_every_selector_and_impact_kind_of_the_schema(self):
+    def test_the_engine_implements_every_selector_and_impact_kind_of_the_catalogs(self):
         S = Setup(BASE["data"], self.cat)
         target = {"contents": "loc-home", "intrusion_contents": "loc-home", "area_contents": "loc-home", "knowledge": "alice", "access": "alice",
-                  "loaded_seeds": "d1", "same_model_devices": "d1", "same_vendor_devices": "d1", "wallets": "coord1"}
-        for on in vocab.SELECTORS:
+                  "loaded_seeds": "d1", "same_model_devices": "d1", "same_vendor_devices": "d1", "wallets": "coord1", "coordinated_wallets": "pc1"}
+        for on in self.cat.access["selectors"]:
             for kind in vocab.KINDS:
-                effects.apply_impact(S, effects.State(), target.get(on, "s1"), {"on": on, "kind": kind})
+                access.apply_impact(S, access.State(), target.get(on, "s1"), {"on": on, "kind": kind})
+        used = {i["on"] for t in self.cat.threats.values() for i in t["impacts"]}
+        self.assertEqual(used - set(self.cat.access["selectors"]), set())
 
     def test_an_unknown_selector_is_refused_instead_of_being_taken_for_items(self):
         with self.assertRaises(ValueError):
-            effects.apply_impact(BASE["S"], effects.State(), "alice", {"on": "nonsense", "kind": "destroyed"})
+            access.apply_impact(BASE["S"], access.State(), "alice", {"on": "nonsense", "kind": "destroyed"})
 
     def test_the_vocabulary_of_the_engine_is_the_one_of_the_schema(self):
-        self.assertTrue(set(vocab.LEAK) <= set(vocab.KINDS) and vocab.MALICIOUS_SOURCES <= set(vocab.DEFS["source"]["enum"]))
+        self.assertTrue(set(vocab.LEAK) <= set(vocab.KINDS))
         self.assertEqual(set(ontology.COLLECTIONS.values()) - set(json.loads((HERE.parent.parent / "SetupOntology.schema.json").read_text())["properties"]), set())
+
+    def test_the_schema_defaults_are_the_only_defaults(self):
+        self.assertEqual(self.S.ent("w-spread")["definition"], "default")
+        self.assertEqual(self.S.ent("s1")["scheme"], "bip39")
+        self.assertTrue(self.S.ent("pc1")["online"])
+        self.assertNotIn("online", self.S.ent("d1"), "a signing device has no such attribute")
 
 
 class StaticData(Base):
     def test_catalogs_are_valid_and_cross_referenced(self):
-        errors = loader.check_catalogs(self.cat, set(predicates.REGISTRY))
+        errors = loader.check_catalogs(self.cat)
         self.assertEqual(errors, [])
 
     def test_fixture_is_valid_without_warnings(self):
@@ -214,11 +268,11 @@ class StaticData(Base):
 
 class Structure(Base):
     def test_contents_follow_sub_locations_and_bags(self):
-        self.assertEqual(set(self.S.contents("loc-home")), {"d1", "b1", "d4", "b4", "d5", "d2a", "b2a", "pc1"})
+        self.assertEqual(set(self.S.contents("loc-home")), {"d1", "b1", "d4", "b4", "d5", "d2a", "b2a", "pc1", "coord1"}, "software runs where its host is")
         self.assertEqual(set(self.S.contents("loc-safe")), {"d2a", "b2a"})
-        self.assertEqual(self.S.bag_contents("bag-1"), ["b-desc-bank"])
-        self.assertEqual(self.S.enclosing_bags("b-desc-bank"), ["bag-1"])
-        self.assertEqual(self.S.loc_of("b-desc-bank"), "loc-bank")
+        self.assertEqual(self.S.contents("bag-1"), ["b-desc-bank"])
+        self.assertEqual(self.S.values("b-desc-bank", "enclosing_bags"), ["bag-1"])
+        self.assertEqual(self.S.place("b-desc-bank"), "loc-bank")
         self.assertIn("b-desc-bank", self.S.contents("loc-bank"))
 
     def test_area_is_building_plus_near_links_in_both_directions(self):
@@ -231,45 +285,59 @@ class Structure(Base):
     def test_reach_needs_access_to_the_parent_location(self):
         self.assertIn("loc-safe", self.S.reach("alice"))
         self.assertNotIn("loc-safe", self.S.reach("bob"))
-        self.assertEqual(set(self.S.reach("carol")), {"loc-w3c"})
-        self.assertEqual(set(self.S.reach("dave")), {"loc-far", "loc-w3d"})
+        self.assertEqual(set(self.S.reach("carol")), {"loc-w3c", "carol"}, "a person reaches what they carry or know")
+        self.assertEqual(set(self.S.reach("dave")), {"loc-far", "loc-w3d", "dave"})
 
     def test_memory_backups_belong_to_the_person_in_whose_head_they_are(self):
-        self.assertEqual(self.S.memory_backups("alice"), ["bk-head"])
-        self.assertEqual(self.S.memory_backups("bob"), [])
+        self.assertEqual(access.select(self.S, "knowledge", "alice"), ["bk-head"])
+        self.assertEqual(access.select(self.S, "knowledge", "bob"), [])
 
     def test_copies_and_devices_of_secrets(self):
-        self.assertEqual([b for b, _ in self.S.copies("s1")], ["b1"])
-        self.assertEqual(self.S.seeds_on("d1"), ["s1"])
-        self.assertEqual(self.S.devices_storing("desc-w2"), ["d2c"])
-        self.assertEqual({b for b, _ in self.S.copies("desc-w2")}, {"b-desc-bank", "b-desc-cloud"})
+        self.assertEqual([c["backup"] for c in self.S.derive("s1", "Seed", "copies")], ["b1"])
+        self.assertEqual(self.S.values("d1", "seeds"), ["s1"])
+        self.assertEqual(self.S.values("desc-w2", "devices"), ["d2c"])
+        self.assertEqual({c["backup"] for c in self.S.derive("desc-w2", "Descriptor", "copies")}, {"b-desc-bank", "b-desc-cloud"})
 
     def test_dependencies_of_wallets(self):
-        self.assertTrue({"s5", "d5", "b5", "pin5", "bk-head", "w-pin"} <= self.S.deps("w-pin"))
-        self.assertNotIn("b1", self.S.deps("w-pin"))
-        self.assertTrue({"bag-1", "strip-1", "coord1", "pin-coord", "desc-w2", "pp2a", "d2c"} <= self.S.deps("w-multi"))
+        self.assertTrue({"s5", "d5", "b5", "pin5", "bk-head", "w-pin"} <= access.deps(self.S, "w-pin"))
+        self.assertNotIn("b1", access.deps(self.S, "w-pin"))
+        self.assertTrue({"bag-1", "strip-1", "coord1", "pc1", "pin-coord", "desc-w2", "pp2a", "d2c"} <= access.deps(self.S, "w-multi"))
 
     def test_dependent_wallets(self):
-        self.assertEqual(self.S.dependent_wallets("d2a"), ["w-multi"])
-        self.assertEqual(self.S.dependent_wallets("coord1"), ["w-multi"])
-        self.assertEqual(self.S.dependent_wallets("desc-w3"), ["w-spread"])
-        self.assertEqual(self.S.dependent_wallets("d1"), ["w-single"])
+        self.assertEqual(self.S.dependents("d2a"), ["w-multi"])
+        self.assertEqual(self.S.dependents("coord1"), ["w-multi"])
+        self.assertEqual(self.S.dependents("desc-w3"), ["w-spread"])
+        self.assertEqual(self.S.dependents("d1"), ["w-single"])
 
     def test_which_wallets_have_a_custom_descriptor(self):
-        self.assertEqual([w for w in WALLETS if self.S.descriptor_is_custom(w)], ["w-multi"])
+        self.assertEqual([w for w in WALLETS if self.S.ent(w)["definition"] == "custom"], ["w-multi"])
         self.assertEqual(self.S.ent("w-spread")["definition"], "default", "the default is filled in")
 
     def test_main_and_auxiliary_wallets(self):
-        self.assertEqual([w for w in WALLETS if not self.S.is_main(w)], ["w-trip"])
+        self.assertEqual([w for w in WALLETS if not self.ev.is_main(w)], ["w-trip"])
 
     def test_condition_semantics_for_missing_values(self):
-        self.assertFalse(model.cond_ok([], {"path": "x", "in": [1]}))
-        self.assertTrue(model.cond_ok([], {"path": "x", "not_in": [1]}))
-        self.assertFalse(model.cond_ok([], {"path": "x", "matches": "."}))
-        self.assertTrue(model.cond_ok([], {"path": "x", "not_matches": "."}))
-        self.assertTrue(model.cond_ok(["yes (EAL6+)"], {"path": "x", "matches": "^yes"}))
-        self.assertTrue(model.cond_ok([True], {"path": "x", "in": [True]}))
-        self.assertTrue(model.cond_ok(["a", "b"], {"path": "x", "in": ["b"]}), "list values match if any element matches")
+        S = self.S
+        held = lambda values, c: graph.condition(S, dict(c, path="$v"), {"$v": values})
+        self.assertFalse(held([], {"in": [1]}))
+        self.assertTrue(held([], {"not_in": [1]}))
+        self.assertFalse(held([], {"matches": "."}))
+        self.assertTrue(held([], {"not_matches": "."}))
+        self.assertTrue(held(["yes (EAL6+)"], {"matches": "^yes"}))
+        self.assertTrue(held([True], {"in": [True]}))
+        self.assertTrue(held(["a", "b"], {"in": ["b"]}), "list values match if any element matches")
+        self.assertTrue(held(["a", "b"], {"count": True, "ge": 2}) and not held(["a"], {"count": True, "ge": 2}))
+        self.assertTrue(held([3], {"gt": 2}) and not held([], {"gt": 2}))
+        self.assertTrue(held([], {"nonempty": False}) and held(["x"], {"nonempty": True}))
+
+    def test_expressions_quantify_and_follow_references(self):
+        S = self.S
+        self.assertTrue(S.holds("w-multi", {"exists": "spending_policies[]", "as": "$p", "where": {"path": "$p.delay_blocks", "gt": 0}}))
+        self.assertFalse(S.holds("w-spread", {"exists": "spending_policies[]", "as": "$p", "where": {"path": "$p.delay_blocks", "gt": 0}}))
+        self.assertEqual(S.values("w-multi", "all_signers[].seed.devices[]"), ["d2a", "d2b", "d2c", "d2f"], "a path follows references into the entities")
+        self.assertEqual(S.values("d2a", "class"), ["SigningDevice", "Device"], "the class with its ancestors")
+        self.assertEqual(S.values("b-desc-bank", "root"), ["loc-bank"])
+        self.assertTrue(S.holds("b-desc-bank", {"path": "root", "eq": "$self.place"}), "the bag sits at the bank")
 
     def test_attribute_paths_and_catalog_columns(self):
         self.assertEqual(self.S.values("d2a", "supply_chain"), ["vendor", "reseller"])
@@ -287,21 +355,20 @@ class Structure(Base):
         self.assertNotEqual(self.S.group_key("b1", paths), self.S.group_key("b2c", paths))
 
 
-# ------------------------------------------------------------------------------------------ predicates
+# ------------------------------------------------------------------------------------------ structural mechanisms
 
 class Predicates(Base):
-    def check(self, name, eid):
-        return predicates.REGISTRY[name](self.S, eid)
+    """The structural conditions that used to be Python predicates are expressions in the catalogs now."""
 
     def test_descriptor_registration_is_needed_only_where_a_device_cannot_derive_it(self):
-        self.assertIsNone(self.check("wallet_descriptors_registered", "d1"), "default single-sig")
-        self.assertTrue(self.check("wallet_descriptors_registered", "d2c"))
-        self.assertFalse(self.check("wallet_descriptors_registered", "d2a"), "a custom descriptor not registered")
-        self.assertFalse(self.check("wallet_descriptors_registered", "d3a"), "multisig without a registration")
-        self.assertTrue(predicates.REGISTRY["wallet_descriptors_registered"](setup_of(store_on("d2a", "desc-w2")), "d2a"))
-        self.assertFalse(predicates.REGISTRY["wallet_descriptors_registered"](setup_of(store_on("d3a")), "d3a"),
-                         "the catalog does not say that a Trezor registers descriptors: unknown counts as no")
-        self.assertEqual([self.S.registration_support(d) for d in ("d2a", "d3a", "d3c")], ["registers", "unknown", "per_transaction"])
+        reg = lambda S, d: present(S, "M-P-REGISTER-DESCRIPTOR", d)
+        self.assertFalse(reg(self.S, "d1"), "default single-sig: nothing to register")
+        self.assertTrue(reg(self.S, "d2c"))
+        self.assertFalse(reg(self.S, "d2a"), "a custom descriptor not registered")
+        self.assertFalse(reg(self.S, "d3a"), "multisig without a registration")
+        self.assertTrue(reg(setup_of(store_on("d2a", "desc-w2")), "d2a"))
+        self.assertFalse(reg(setup_of(store_on("d3a")), "d3a"), "the catalog does not say that a Trezor registers descriptors: unknown counts as no")
+        self.assertEqual([self.S.values(d, "catalog.descriptor_registration") for d in ("d2a", "d3a", "d3c")], [["registers"], ["unknown"], ["per_transaction"]])
 
     def test_a_registration_counts_only_if_every_group_of_signers_has_one(self):
         def note(eid, S=None, rows=None):
@@ -318,11 +385,11 @@ class Predicates(Base):
 
     def test_the_quorum_rule_per_policy(self):
         S = self.S
-        self.assertFalse(S.quorum_covered("w-multi", {"d2c"}))
-        self.assertFalse(S.quorum_covered("w-multi", {"d2a", "d2c"}), "the delayed fallback policy has a signer without it")
-        self.assertTrue(S.quorum_covered("w-multi", {"d2a", "d2c", "d2f"}), "two of three have it: no group of two avoids it")
-        self.assertTrue(S.quorum_covered("w-single", {"d1"}))
-        self.assertFalse(S.quorum_covered("w-single", set()))
+        self.assertFalse(rating.quorum_covered(S, "w-multi", {"d2c"}))
+        self.assertFalse(rating.quorum_covered(S, "w-multi", {"d2a", "d2c"}), "the delayed fallback policy has a signer without it")
+        self.assertTrue(rating.quorum_covered(S, "w-multi", {"d2a", "d2c", "d2f"}), "two of three have it: no group of two avoids it")
+        self.assertTrue(rating.quorum_covered(S, "w-single", {"d1"}))
+        self.assertFalse(rating.quorum_covered(S, "w-single", set()))
 
     def test_a_device_that_needs_the_descriptor_for_every_signing_counts_if_it_is_kept_where_the_device_is(self):
         def seedsigner(d):
@@ -351,12 +418,13 @@ class Predicates(Base):
 
     def test_a_descriptor_that_contains_the_tripwire_key_gives_it_away(self):
         S2 = setup_of(link_tripwire)
-        link = predicates.linking_descriptor
-        self.assertFalse(link(S2, "w-trip", set()))
-        self.assertTrue(link(S2, "w-trip", {"desc-w-single"}))
-        self.assertFalse(link(S2, "w-trip", {"desc-w2"}), "that descriptor has other keys")
-        self.assertTrue(link(S2, "w-trip", {model.PLAN}), "the plan shows the whole structure")
-        self.assertFalse(link(self.S, "w-trip", {"desc-w-single"}), "without the shared key nothing links them")
+        rule = BASE["cat"].mechanisms["M-D-TRIPWIRE"]["weakened_when"][0]["when"]
+        link = lambda S, known: S.holds("w-trip", rule, {"@state": state(secret_known=known)})
+        self.assertFalse(link(S2, set()))
+        self.assertTrue(link(S2, {"desc-w-single"}))
+        self.assertFalse(link(S2, {"desc-w2"}), "that descriptor has other keys")
+        self.assertTrue(link(S2, {graph.PLAN}), "the plan shows the whole structure")
+        self.assertFalse(link(self.S, {"desc-w-single"}), "without the shared key nothing links them")
 
     def test_a_recognised_tripwire_counts_less(self):
         tripwire = lambda rows: [m for m in rows["T-LOC-ATTACK-LOCAL@loc-home"]["V"]["mechanisms"] if m["mechanism"] == "M-D-TRIPWIRE"]
@@ -367,7 +435,7 @@ class Predicates(Base):
         self.assertGreater(rows["T-LOC-ATTACK-LOCAL@loc-home"]["V"]["value"], self.rows["T-LOC-ATTACK-LOCAL@loc-home"]["V"]["value"])
 
     def test_an_attacker_derives_default_descriptors_from_keys_and_from_known_descriptors(self):
-        known = predicates.descriptor_known
+        known = lambda S, w, ids: access.descriptor_known(S, state(secret_known=ids), w)
         self.assertTrue(known(self.S, "w-single", {"s1"}), "a default single-sig descriptor follows from its seed")
         self.assertFalse(known(self.S, "w-spread", {"s3a", "s3b", "s3c"}), "all four signers are needed")
         self.assertTrue(known(self.S, "w-spread", {"s3a", "s3b", "s3c", "s3d"}))
@@ -378,21 +446,20 @@ class Predicates(Base):
         self.assertTrue(known(S2, "w-trip", {"desc-w-single"}), "the descriptor of w-single contains the key of w-trip")
 
     def test_privacy_is_lost_when_a_descriptor_is_known_explicitly_or_derived(self):
-        ev = effects.Evaluator(self.S)
+        ev = outc.Evaluator(self.S)
         privacy = lambda st: {o["wallet"] for o in ev.evaluate(st) if o["outcome"] == "privacy_loss"}
         self.assertEqual(privacy(state(disclosed={"laptop2"})), {"w-single", "w-spread", "w-trip", "w-pin"}, "coord2 keeps their descriptors; coord1 keeps that of w-multi")
         S2 = setup_of(link_tripwire)
-        st = state(disclosed={"d4"})
-        ev2 = effects.Evaluator(S2)
-        self.assertIn("w-trip", {o["wallet"] for o in ev2.evaluate(st) if o["outcome"] == "privacy_loss"})
+        ev2 = outc.Evaluator(S2)
+        self.assertIn("w-trip", {o["wallet"] for o in ev2.evaluate(state(disclosed={"d4"})) if o["outcome"] == "privacy_loss"})
 
     def test_a_wallet_can_have_several_coordinators(self):
         def second(d):
             d["coordinators"].append({"id": "coord3", "name": "Third", "product": "Sparrow", "runs_on": "pc1", "stores_descriptors": ["desc-w3"]})
         S2 = setup_of(second)
-        self.assertEqual(S2.coordinators_of("w-spread"), ["coord2", "coord3"])
-        self.assertTrue({"coord2", "coord3", "pc1", "laptop2"} <= S2.deps("w-spread"))
-        self.assertEqual(S2.dependent_wallets("coord3"), ["w-spread"])
+        self.assertEqual(S2.values("w-spread", "coordinators"), ["coord2", "coord3"])
+        self.assertTrue({"coord2", "coord3", "pc1", "laptop2"} <= access.deps(S2, "w-spread"))
+        self.assertEqual(S2.dependents("coord3"), ["w-spread"])
 
     def test_the_tripwire_needs_a_coordinator_that_has_its_descriptor(self):
         tripwire = lambda rows: [m for m in rows["T-LOC-ATTACK-LOCAL@loc-home"]["V"]["mechanisms"] if m["mechanism"] == "M-D-TRIPWIRE"]
@@ -408,91 +475,86 @@ class Predicates(Base):
         self.assertEqual(entities("d2c"), {"d2c"})
 
     def test_wallet_predicates(self):
-        self.assertTrue(self.check("has_delayed_policy", "w-multi"))
-        self.assertFalse(self.check("has_delayed_policy", "w-spread"))
-        self.assertTrue(self.check("requires_several_signers", "w-multi"))
-        self.assertTrue(self.check("requires_several_signers", "w-spread"))
-        self.assertFalse(self.check("requires_several_signers", "w-single"))
-        self.assertTrue(self.check("has_spare_signers", "w-multi"))
-        self.assertFalse(self.check("has_spare_signers", "w-single"))
+        self.assertTrue(present(self.S, "M-P-FALLBACK-POLICY", "w-multi"))
+        self.assertFalse(present(self.S, "M-P-FALLBACK-POLICY", "w-spread"))
+        self.assertTrue(present(self.S, "M-P-MULTI-SIGNER-QUORUM", "w-multi"))
+        self.assertTrue(present(self.S, "M-P-MULTI-SIGNER-QUORUM", "w-spread"))
+        self.assertFalse(present(self.S, "M-P-MULTI-SIGNER-QUORUM", "w-single"))
+        self.assertTrue(present(self.S, "M-P-SPARE-SIGNERS", "w-multi"))
+        self.assertFalse(present(self.S, "M-P-SPARE-SIGNERS", "w-single"))
 
     def test_signers_apart_needs_no_single_place_or_person_to_reach_a_quorum(self):
-        self.assertTrue(self.check("signers_stored_apart", "w-spread"))
-        self.assertFalse(self.check("signers_stored_apart", "w-multi"), "Alice alone reaches three signers")
+        self.assertTrue(present(self.S, "M-P-SIGNERS-APART", "w-spread"))
+        self.assertFalse(present(self.S, "M-P-SIGNERS-APART", "w-multi"), "Alice alone reaches three signers")
 
     def test_single_signer_wallets_have_no_signers_to_keep_apart(self):
-        self.assertIsNone(self.check("signers_stored_apart", "w-single"))
+        self.assertFalse(present(self.S, "M-P-SIGNERS-APART", "w-single"))
 
     def test_seed_with_passphrase(self):
-        self.assertTrue(self.check("seed_used_with_passphrase", "s2a"))
-        self.assertFalse(self.check("seed_used_with_passphrase", "s2b"))
-        self.assertFalse(self.check("seed_used_with_passphrase", "s1"))
+        self.assertTrue(present(self.S, "M-P-PASSPHRASE", "s2a"))
+        self.assertFalse(present(self.S, "M-P-PASSPHRASE", "s2b"))
+        self.assertFalse(present(self.S, "M-P-PASSPHRASE", "s1"))
 
     def test_secret_parts_apart(self):
-        self.assertTrue(self.check("secret_parts_stored_apart", "pp2a"))
-        self.assertTrue(self.check("secret_parts_stored_apart", "s2a"))
-        self.assertTrue(self.check("secret_parts_stored_apart", "pin5"))
-        self.assertIsNone(self.check("secret_parts_stored_apart", "s1"), "no passphrase, nothing to keep apart")
+        self.assertTrue(present(self.S, "M-P-SECRET-PARTS-APART", "pp2a"))
+        self.assertTrue(present(self.S, "M-P-SECRET-PARTS-APART", "s2a"))
+        self.assertTrue(present(self.S, "M-P-SECRET-PARTS-APART", "pin5"))
+        self.assertFalse(present(self.S, "M-P-SECRET-PARTS-APART", "s1"), "no passphrase, nothing to keep apart")
 
     def test_copies_in_different_locations(self):
-        self.assertTrue(self.check("has_copies_in_different_locations", "desc-w2"))
-        self.assertFalse(self.check("has_copies_in_different_locations", "s1"))
+        self.assertTrue(present(self.S, "M-P-REDUNDANT-BACKUPS", "desc-w2"))
+        self.assertFalse(present(self.S, "M-P-REDUNDANT-BACKUPS", "s1"))
 
     def test_supply_chain(self):
-        self.assertTrue(self.check("supply_chain_direct", "d1"))
-        self.assertFalse(self.check("supply_chain_direct", "d2a"))
-        self.assertFalse(self.check("supply_chain_direct", "d2b"), "unknown supply chain counts as not direct")
+        self.assertTrue(present(self.S, "M-P-SUPPLY-CHAIN-DIRECT", "d1"))
+        self.assertFalse(present(self.S, "M-P-SUPPLY-CHAIN-DIRECT", "d2a"))
+        self.assertFalse(present(self.S, "M-P-SUPPLY-CHAIN-DIRECT", "d2b"), "unknown supply chain counts as not direct")
 
     def test_strip_and_bag(self):
-        self.assertTrue(self.check("strip_and_bag_reachable_together", "strip-1"))
-        self.assertFalse(self.check("strip_and_bag_stored_apart", "strip-1"))
+        together = BASE["cat"].threats["T-STRIP-SWAPPED-WITH-BAG"]["applies_when"]
+        self.assertTrue(self.S.holds("strip-1", together))
+        self.assertFalse(present(self.S, "M-P-STRIP-APART-FROM-BAG", "strip-1"))
 
     def test_encrypted_items(self):
-        self.assertTrue(self.check("has_encrypted_items", "b-desc-cloud"))
-        self.assertFalse(self.check("has_encrypted_items", "b1"))
+        cond = BASE["cat"].threats["T-BAK-CANNOT-DECRYPT"]["applies_when"]
+        self.assertTrue(self.S.holds("b-desc-cloud", cond))
+        self.assertFalse(self.S.holds("b1", cond))
 
 
 # ------------------------------------------------------------------------------------------ evaluator
 
-def state(**sets):
-    st = effects.State()
-    for k, v in sets.items():
-        getattr(st, k).update(v)
-    return st
-
-
 class Evaluator(Base):
     def tier(self, st, wallet):
-        return effects.tier(self.S, st, wallet)
+        return access.tier(self.S, st, wallet)
 
     def test_untouched_setup_is_usable_and_nothing_is_stolen(self):
-        st = effects.State()
+        st = access.State()
         for w in WALLETS:
             self.assertEqual(self.tier(st, w), 0, w)
-        self.assertEqual(effects.attacker_secrets(self.S, st), set())
+        self.assertEqual(access.attacker_secrets(self.S, st), set())
         self.assertEqual(self.ev.evaluate(st), [])
 
     def test_memory_secrets_die_with_their_person(self):
-        owner = effects.Owner(self.S, state(lost={"alice"}), True)
-        self.assertFalse(owner.obtain("pp2a"))
-        self.assertFalse(owner.obtain("pin-coord"))
-        self.assertTrue(owner.obtain("s1"))
+        st = state(lost={"alice"})
+        self.assertFalse(obtain(self.S, st, "pp2a"))
+        self.assertFalse(obtain(self.S, st, "pin-coord"))
+        self.assertTrue(obtain(self.S, st, "s1"))
 
     def test_encrypted_copy_needs_one_of_its_keys(self):
         st = state(lost={"b-desc-bank", "d2c", "pc1"})
-        self.assertTrue(effects.Owner(self.S, st, True).obtain("desc-w2"), "the cloud copy is decrypted with s2b")
+        self.assertTrue(obtain(self.S, st, "desc-w2"), "the cloud copy is decrypted with s2b")
         st = state(lost={"b-desc-bank", "d2c", "b2b", "d2b", "b2c", "pc1"})
-        self.assertFalse(effects.Owner(self.S, st, True).obtain("desc-w2"))
+        self.assertFalse(obtain(self.S, st, "desc-w2"))
 
     def test_a_pin_protects_a_disclosed_device(self):
-        self.assertNotIn("s5", effects.attacker_secrets(self.S, state(disclosed={"d5"})))
-        self.assertIn("s5", effects.attacker_secrets(self.S, state(disclosed={"d5"}, secret_known={"pin5"})))
-        self.assertIn("s5", effects.attacker_secrets(self.S, state(controlled={"d5"})), "a controlled device is used by its owner")
-        self.assertIn("s1", effects.attacker_secrets(self.S, state(disclosed={"d1"})), "no PIN, no protection")
+        self.assertNotIn("s5", access.attacker_secrets(self.S, state(disclosed={"d5"})))
+        self.assertIn("s5", access.attacker_secrets(self.S, state(disclosed={"d5"}, secret_known={"pin5"})))
+        self.assertIn("s5", access.attacker_secrets(self.S, state(controlled={"d5"})), "a controlled device is used by its owner")
+        self.assertIn("s1", access.attacker_secrets(self.S, state(disclosed={"d1"})), "no PIN, no protection")
 
     def test_encrypted_backup_needs_a_key_on_the_attackers_side(self):
-        self.assertNotIn("desc-w2", effects.attacker_secrets(self.S, state(disclosed={"b-desc-cloud"})))
-        self.assertIn("desc-w2", effects.attacker_secrets(self.S, state(disclosed={"b-desc-cloud"}, secret_known={"s2b"})))
+        self.assertNotIn("desc-w2", access.attacker_secrets(self.S, state(disclosed={"b-desc-cloud"})))
+        self.assertIn("desc-w2", access.attacker_secrets(self.S, state(disclosed={"b-desc-cloud"}, secret_known={"s2b"})))
 
     def test_blocked_is_temporary_and_lost_is_permanent(self):
         self.assertEqual(self.tier(state(blocked={"b1", "d1"}), "w-single"), 1)
@@ -521,19 +583,19 @@ class Evaluator(Base):
     def test_a_descriptor_registered_on_a_device_is_a_copy(self):
         gone = {"b-desc-w3-far", "b-desc-w3-cloud", "laptop2"}
         S2 = setup_of(store_on("d3b"))
-        self.assertTrue(effects.Owner(S2, state(lost=gone), True).descriptor_copy("w-spread"))
-        self.assertFalse(effects.Owner(S2, state(lost=gone | {"d3b"}), True).descriptor_copy("w-spread"))
-        self.assertFalse(effects.Owner(self.S, state(lost=gone), True).descriptor_copy("w-spread"), "nothing is registered in the fixture")
+        self.assertTrue(descriptor_copy(S2, state(lost=gone), "w-spread"))
+        self.assertFalse(descriptor_copy(S2, state(lost=gone | {"d3b"}), "w-spread"))
+        self.assertFalse(descriptor_copy(self.S, state(lost=gone), "w-spread"), "nothing is registered in the fixture")
 
     def test_a_registered_descriptor_behind_a_pin_needs_the_pin(self):
         gone = {"b-desc-w3-far", "b-desc-w3-cloud", "laptop2"}
         S2 = setup_of(store_on("d5"))
-        self.assertTrue(effects.Owner(S2, state(lost=gone), True).descriptor_copy("w-spread"))
-        self.assertFalse(effects.Owner(S2, state(lost=gone | {"alice"}), True).descriptor_copy("w-spread"), "the PIN is in Alice's head")
+        self.assertTrue(descriptor_copy(S2, state(lost=gone), "w-spread"))
+        self.assertFalse(descriptor_copy(S2, state(lost=gone | {"alice"}), "w-spread"), "the PIN is in Alice's head")
 
     def test_an_attacker_who_holds_a_device_learns_the_descriptor_registered_on_it(self):
-        self.assertIn("desc-w3", effects.attacker_secrets(setup_of(store_on("d3a")), state(disclosed={"d3a"})))
-        self.assertNotIn("desc-w3", effects.attacker_secrets(self.S, state(disclosed={"d3a"})))
+        self.assertIn("desc-w3", access.attacker_secrets(setup_of(store_on("d3a")), state(disclosed={"d3a"})))
+        self.assertNotIn("desc-w3", access.attacker_secrets(self.S, state(disclosed={"d3a"})))
 
     def test_a_custom_single_sig_wallet_needs_its_copy(self):
         def custom(d):
@@ -543,37 +605,41 @@ class Evaluator(Base):
             d["backups"].append({"id": "b-desc-single", "name": "copy", "medium": "paper", "stored_in": {"location": "loc-home"},
                                  "items": [{"subject": {"descriptor": "desc-w-single"}, "format": "text"}]})
         S2 = setup_of(custom)
-        self.assertEqual(effects.tier(S2, effects.State(), "w-single"), 0)
-        self.assertEqual(effects.tier(S2, state(lost={"b-desc-single"}), "w-single"), 2, "the seed is there, the descriptor is not")
-        self.assertEqual(effects.tier(S2, state(blocked={"b-desc-single"}), "w-single"), 1)
-        self.assertEqual(effects.tier(self.S, state(), "w-single"), 0, "a default single-sig wallet is rebuilt from its one signer")
+        self.assertEqual(access.tier(S2, access.State(), "w-single"), 0)
+        self.assertEqual(access.tier(S2, state(lost={"b-desc-single"}), "w-single"), 2, "the seed is there, the descriptor is not")
+        self.assertEqual(access.tier(S2, state(blocked={"b-desc-single"}), "w-single"), 1)
+        self.assertEqual(access.tier(self.S, state(), "w-single"), 0, "a default single-sig wallet is rebuilt from its one signer")
 
     def test_a_default_multi_signer_wallet_without_any_copy_needs_all_signers(self):
         def no_copies(d):
             d.update(backups=[b for b in d["backups"] if b["id"] not in ("b-desc-w3-far", "b-desc-w3-cloud")])
             next(c for c in d["coordinators"] if c["id"] == "coord2")["stores_descriptors"].remove("desc-w3")
         S2 = setup_of(no_copies)
-        self.assertEqual(effects.tier(S2, effects.State(), "w-spread"), 0)
-        self.assertEqual(effects.tier(S2, state(lost={"d3a", "b3a"}), "w-spread"), 2, "the key of the lost signer is missing")
+        self.assertEqual(access.tier(S2, access.State(), "w-spread"), 0)
+        self.assertEqual(access.tier(S2, state(lost={"d3a", "b3a"}), "w-spread"), 2, "the key of the lost signer is missing")
 
     def test_single_signer_wallets_need_no_descriptor(self):
         self.assertEqual(self.tier(state(), "w-single"), 0)
-        self.assertTrue(effects.Owner(self.S, state(lost={"b1"}), True).descriptor_ok("w-single"))
+        self.assertTrue(descriptor_ok(self.S, state(lost={"b1"}), "w-single"))
 
     def test_losing_every_descriptor_copy_loses_the_pairs_that_may_spend(self):
         out = self.ev.evaluate(state(lost={"b-desc-w3-far", "b-desc-w3-cloud", "laptop2"}))
         self.assertEqual({o["outcome"] for o in out if o["wallet"] == "w-spread"}, {"inconvenience", "main_loss"},
-                         "no pair can rebuild a default descriptor, which needs all four signers"
                          "a default descriptor is rebuilt from all four signers, which no pair of people has")
         out = self.ev.evaluate(state(lost={"b-desc-w3-far"}))
-        self.assertEqual({o["outcome"] for o in out if o["wallet"] == "w-spread"}, {"inconvenience"}, "one copy is left")
+        self.assertEqual({o["outcome"] for o in out if o["wallet"] == "w-spread"}, {"inconvenience", "latent_margin"},
+                         "one copy is left: the redundancy is smaller, but no single further event is critical")
 
-    def test_theft_needs_threshold_many_complete_signers(self):
+    def test_theft_needs_threshold_many_complete_signers_and_the_descriptor(self):
         S = self.S
-        known = {"s2a", "s2b"}
-        self.assertFalse(effects.theft(S, effects.State(), "w-multi", known), "signer a lacks its passphrase")
-        self.assertTrue(effects.theft(S, effects.State(), "w-multi", known | {"pp2a"}))
-        self.assertTrue(effects.theft(S, effects.State(), "w-multi", {"s2f"}), "the delayed policy counts for an attacker")
+        self.assertFalse(theft(S, state(secret_known={"s2a", "s2b", "desc-w2"}), "w-multi"), "signer a lacks its passphrase")
+        self.assertTrue(theft(S, state(secret_known={"s2a", "s2b", "pp2a", "desc-w2"}), "w-multi"))
+        self.assertFalse(theft(S, state(secret_known={"s2a", "s2b", "pp2a"}), "w-multi"), "a custom wallet cannot be spent without its descriptor")
+        self.assertEqual(access.theft_delay(S, state(secret_known={"s2f", "desc-w2"}), "w-multi"), 52000, "the delayed policy counts for an attacker")
+        self.assertTrue(theft(S, state(secret_known={"s3a", "s3b", "desc-w3"}), "w-spread"))
+        self.assertFalse(theft(S, state(secret_known={"s3a", "s3b"}), "w-spread"), "two of four keys do not give the default descriptor")
+        self.assertTrue(theft(S, state(secret_known={"s3a", "s3b", "s3c", "s3d"}), "w-spread"), "all four keys do")
+        self.assertTrue(theft(S, state(secret_known={"s1"}), "w-single"), "a single key gives its default descriptor")
 
     def test_margin_is_left_only_if_no_single_further_failure_is_critical(self):
         self.assertTrue(self.ev.margin_left(state(lost={"d3a", "b3a"}), "w-spread"), "2 of 4 with one signer gone")
@@ -589,7 +655,7 @@ class Evaluator(Base):
         self.premise(any(i["mechanism"] == "M-D-CROSS-CHECK-TRANSACTION" for i in insts), "cross-check is present for w-multi")
         out = [{"wallet": "w-multi", "outcome": "main_loss", "detail": "", "exploit": "at_use"},
                {"wallet": "w-single", "outcome": "inconvenience", "detail": "", "exploit": "none"}]
-        V = analyze.worst_vulnerability(S, cat, "T-COORD-MALICIOUS-SEND", insts, ("coord1",), effects.State(), out, {"value": 4})
+        V = analyze.worst_vulnerability(S, cat, "T-COORD-MALICIOUS-SEND", insts, ("coord1",), access.State(), out, {"value": 4})
         self.assertEqual((V["wallet"], V["value"]), ("w-multi", 2), "the unprotected single-sig wallet is less severe and must not count")
 
     def test_a_wallet_that_is_already_unusable_has_no_margin(self):
@@ -597,13 +663,17 @@ class Evaluator(Base):
         self.assertEqual(self.tier(state(lost=three_gone), "w-spread"), 2)
         self.assertFalse(self.ev.margin_left(state(lost=three_gone), "w-spread"))
 
-    def test_non_malicious_tampering_is_a_loss_of_the_part(self):
-        st = effects.State()
-        effects.apply_impact(self.S, st, "desc-w2", {"on": "self", "kind": "tampered"}, malicious=False)
-        self.assertEqual(st.lost, {"desc-w2"})
-        st = effects.State()
-        effects.apply_impact(self.S, st, "desc-w2", {"on": "self", "kind": "tampered"}, malicious=True)
-        self.assertEqual(st.tampered, {"desc-w2"})
+    def test_a_faulty_part_is_lost_for_the_owners_and_worthless_for_the_attacker(self):
+        self.assertFalse(obtain(self.S, state(faulty={"desc-w2"}), "desc-w2"))
+        self.assertEqual(self.tier(state(faulty={"desc-w2"}), "w-multi"), 2)
+        self.assertNotIn("desc-w2", access.attacker_secrets(self.S, state(faulty={"desc-w2"}, disclosed={"b-desc-bank"})), "a wrong copy is no copy")
+        self.assertFalse(theft(self.S, state(tampered={"b1"}), "w-single"), "a tampered backup gives the attacker nothing to spend with")
+
+    def test_a_controlled_part_bypasses_its_guard_and_a_tampered_one_is_commanded(self):
+        self.assertIn("desc-w2", access.attacker_secrets(self.S, state(controlled={"pc1"})), "malware on the host reads the coordinator despite its password")
+        self.assertNotIn("desc-w2", access.attacker_secrets(self.S, state(disclosed={"pc1"})), "a stolen host still needs the password")
+        self.assertIn("s5", access.attacker_secrets(self.S, state(tampered={"d5"})), "a swapped device is used by its owner, PIN and all")
+        self.assertEqual(access.attacker_secrets(self.S, state(tampered={"b5"})), set(), "a tampered backup tells the attacker nothing")
 
 
 # ------------------------------------------------------------------------------------------ instantiation
@@ -638,9 +708,9 @@ class Instantiation(Base):
             self.not_applicable("T-LOC-INACCESSIBLE", loc, "applies_when")
         self.assertIn("T-LOC-INACCESSIBLE@loc-home", self.rows)
 
-    def test_predicates_filter_instances(self):
+    def test_structural_conditions_filter_instances(self):
         self.assertEqual(self.entities_of("T-WALLET-TIMELOCK-LAPSE"), {"w-multi"})
-        self.not_applicable("T-WALLET-TIMELOCK-LAPSE", "w-single", "predicate:")
+        self.not_applicable("T-WALLET-TIMELOCK-LAPSE", "w-single", "applies_when")
         self.assertEqual(self.entities_of("T-BAK-CANNOT-DECRYPT"), {"b-desc-cloud"})
         self.assertIn("T-STRIP-SWAPPED-WITH-BAG@strip-1", self.rows)
 
@@ -660,12 +730,12 @@ class Instantiation(Base):
 class Propagation(Base):
     def test_fire_destroys_the_building_including_the_safe(self):
         r = self.row("T-LOC-FIRE@loc-home")
-        self.assertEqual(effect(r, "lost"), {"b1", "b2a", "b4", "d1", "d2a", "d4", "d5", "pc1"})
+        self.assertEqual(effect(r, "destroyed"), {"b1", "b2a", "b4", "d1", "d2a", "d4", "d5", "pc1", "coord1"}, "the software dies with its host")
         self.assertIn("main_loss", outcomes(r, "w-single"))
         self.assertEqual(exploits(r, "w-single", "main_loss"), {"none"})
         self.assertIn("aux_loss", outcomes(r, "w-trip"))
         self.assertNotIn("main_loss", outcomes(r, "w-trip"), "a tripwire is never main funds")
-        self.assertEqual(outcomes(r, "w-pin"), {"inconvenience"}, "the seed backup is at the trustee")
+        self.assertEqual(outcomes(r, "w-pin"), {"inconvenience", "latent_no_margin"}, "the seed backup at the trustee is the last copy")
         self.assertIn("latent_no_margin", outcomes(r, "w-multi"))
         self.assertNotIn("main_loss", outcomes(r, "w-multi"))
         self.assertEqual(outcomes(r, "w-spread"), set())
@@ -673,17 +743,17 @@ class Propagation(Base):
 
     def test_area_events_reach_near_locations(self):
         r = self.row("T-LOC-NATURAL-DISASTER@loc-home")
-        self.assertTrue({"d2b", "b2b", "d1", "d2a"} <= effect(r, "lost"))
+        self.assertTrue({"d2b", "b2b", "d1", "d2a"} <= effect(r, "destroyed"))
         self.assertIn("lockout_temporary", outcomes(r, "w-multi"), "two signers gone, the delayed policy remains")
         self.assertNotIn("main_loss", outcomes(r, "w-multi"))
-        self.assertIn("d1", effect(self.row("T-LOC-NATURAL-DISASTER@loc-office"), "lost"), "near works both ways")
+        self.assertIn("d1", effect(self.row("T-LOC-NATURAL-DISASTER@loc-office"), "destroyed"), "near works both ways")
 
     def test_local_events_do_not_reach_near_locations(self):
-        self.assertNotIn("d2b", effect(self.row("T-LOC-FIRE@loc-home"), "lost"))
+        self.assertNotIn("d2b", effect(self.row("T-LOC-FIRE@loc-home"), "destroyed"))
 
     def test_war_destroys_and_discloses_the_whole_area(self):
         r = self.row("T-LOC-ATTACK-AREA@loc-home")
-        self.assertTrue({"d2b", "b2b"} <= effect(r, "lost") & effect(r, "disclosed"))
+        self.assertTrue({"d2b", "b2b"} <= effect(r, "destroyed") & effect(r, "disclosed"))
         self.assertIn("lockout_temporary", outcomes(r, "w-multi"))
         self.assertNotIn("main_loss", outcomes(r, "w-multi"), "signer a lacks its passphrase, b alone is not enough")
 
@@ -694,7 +764,7 @@ class Propagation(Base):
         self.assertIn("aux_loss", outcomes(r, "w-trip"))
         self.assertNotIn("main_loss", outcomes(r, "w-multi"))
         self.assertIn("latent_no_margin", outcomes(r, "w-multi"))
-        self.assertEqual(outcomes(r, "w-pin"), {"inconvenience"}, "d5 is disclosed but its PIN is in Alice's head")
+        self.assertEqual(outcomes(r, "w-pin"), {"inconvenience", "latent_no_margin"}, "d5 is disclosed but its PIN is in Alice's head; only the backup at the trustee is left")
         self.assertIn("d5", effect(r, "disclosed"))
 
     def test_common_cause_by_provider_and_jurisdiction(self):
@@ -712,7 +782,11 @@ class Propagation(Base):
         self.assertEqual(exploits(r, "w-single", "main_loss"), {"immediate"})
         self.assertNotIn("main_loss", outcomes(r, "w-multi"), "d2a is the same model, but signer a has a passphrase")
         r = self.row("T-DEV-LEAKS-KEY@d3a")
-        self.assertEqual(exploits(r, "w-spread", "main_loss"), {"immediate"}, "d3b is the same model: two signers")
+        self.assertTrue({"s3a", "s3b"} <= effect(r, "known"), "d3b is the same model: two signers")
+        self.assertNotIn("main_loss", outcomes(r, "w-spread"), "two keys of four do not give the default descriptor; a copy or the other keys are needed")
+        self.assertIn("latent_no_margin", outcomes(r, "w-spread"))
+        rows = by_id(variant(lambda d: d["backups"].append({"id": "b-desc-home", "name": "descriptor at home", "medium": "paper", "stored_in": {"location": "loc-w3a"}, "items": [{"subject": {"descriptor": "desc-w3"}, "format": "text"}]})))
+        self.assertNotIn("main_loss", outcomes(rows["T-DEV-LEAKS-KEY@d3a"], "w-spread"), "a copy somewhere else does not help the attacker either")
         r = self.row("T-DEV-LEAKS-KEY@d3c")
         self.assertNotIn("main_loss", outcomes(r, "w-spread"))
         self.assertIn("latent_no_margin", outcomes(r, "w-spread"), "one signer known, one more makes theft")
@@ -723,15 +797,16 @@ class Propagation(Base):
         self.assertNotIn("aux_loss", outcomes(r, "w-trip"))
         r = self.row("T-DEV-BACKDOOR@d4")
         self.assertEqual(effect(r, "controlled"), {"d3a", "d3b", "d4", "d5"})
-        self.assertIn("main_loss", outcomes(r, "w-spread"))
+        self.assertIn("latent_no_margin", outcomes(r, "w-spread"), "two keys, but not the descriptor")
         self.assertIn("main_loss", outcomes(r, "w-pin"))
         self.assertNotIn("main_loss", outcomes(r, "w-single"))
 
     def test_a_weakness_of_the_seed_scheme_hits_every_seed_with_that_scheme(self):
         r = self.row("T-SEED-SCHEME-WEAKNESS@s1")
         self.assertEqual(len(r["common_cause"]), len(BASE["data"]["seeds"]) - 1, "all seeds default to bip39")
-        for w in ("w-single", "w-multi", "w-spread", "w-pin"):
+        for w in ("w-single", "w-spread", "w-pin"):
             self.assertIn("main_loss", outcomes(r, w), w)
+        self.assertIn("latent_no_margin", outcomes(r, "w-multi"), "every key, but the custom descriptor is not among them")
         self.assertIn("aux_loss", outcomes(r, "w-trip"))
 
     def test_protocol_weaknesses_hit_every_wallet(self):
@@ -779,7 +854,7 @@ class Propagation(Base):
         r = self.row("T-BAK-TAMPERED@b1")
         self.assertEqual(exploits(r, "w-single", "main_loss"), {"at_recovery"})
         r = self.row("T-BAK-INCORRECT@b1")
-        self.assertEqual(outcomes(r, "w-single"), {"inconvenience"}, "an owner's mistake only costs the copy; the device still holds the seed")
+        self.assertEqual(outcomes(r, "w-single"), {"inconvenience", "latent_no_margin"}, "an owner's mistake only costs the copy; the device still holds the seed, and is now the last copy")
 
     def test_groups_need_a_value_to_group_by(self):
         for loc in ("loc-cloud", "loc-safe"):
@@ -798,12 +873,12 @@ class Propagation(Base):
 
     def test_death_removes_a_person_and_what_only_that_person_knows_or_reaches(self):
         r = self.row("T-PERSON-DEATH@alice")
-        self.assertEqual(effect(r, "lost"), {"alice", "bk-head"})
-        self.assertEqual(outcomes(r, "w-single"), set(), "Bob reaches everything of w-single")
+        self.assertEqual(effect(r, "destroyed"), {"alice", "bk-head"})
+        self.assertEqual(outcomes(r, "w-single"), {"latent_no_margin"}, "Bob reaches everything of w-single, and is now the only one who does")
         self.assertIn("latent_no_margin", outcomes(r, "w-multi"))
         self.assertNotIn("main_loss", outcomes(r, "w-multi"))
         self.assertEqual(outcomes(r, "w-spread"), {"latent_margin"}, "one of four signers lost, any one more is fine")
-        self.assertEqual(outcomes(r, "w-pin"), {"inconvenience"})
+        self.assertEqual(outcomes(r, "w-pin"), {"inconvenience", "latent_no_margin"}, "the PIN died with Alice; the backup at the trustee is the last way")
 
     def test_a_malicious_person_gets_what_he_reaches_and_knows_but_not_beyond_his_rights(self):
         r = self.row("T-PERSON-MALICIOUS@alice")
@@ -866,8 +941,9 @@ class Propagation(Base):
         self.assertIn("lockout_temporary", outcomes(r, "w-multi"), "and until a corrected one is found the wallet is blocked")
         self.assertEqual(r["S"]["outcome"], "main_loss")
         r = self.row("T-DESC-INCORRECT@desc-w3")
-        self.assertFalse({"lockout_temporary"} & outcomes(r, "w-spread"))
+        self.assertFalse({"lockout_temporary"} & outcomes(r, "w-spread"), "a default wallet is not blocked by a wrong copy")
         self.assertIn("main_loss", outcomes(r, "w-spread"), "a default descriptor is rebuilt from all signers, which no pair of people has")
+        self.assertNotIn("T-DESC-DERIVATION-UNKNOWN@desc-w3", self.rows, "the derivation of a default wallet is the standard one")
 
     def test_a_bypassed_bag_discloses_its_contents(self):
         r = self.row("T-BAG-BYPASSED@bag-1")
@@ -877,9 +953,9 @@ class Propagation(Base):
 
     def test_a_fireproof_product_survives_fire(self):
         r = self.row("T-LOC-FIRE@loc-bank")
-        self.assertNotIn("b2c", effect(r, "lost"))
-        self.assertIn("b-desc-bank", effect(r, "lost"))
-        self.assertEqual(outcomes(r, "w-multi"), {"inconvenience"})
+        self.assertNotIn("b2c", effect(r, "destroyed"))
+        self.assertIn("b-desc-bank", effect(r, "destroyed"))
+        self.assertEqual(outcomes(r, "w-multi"), {"inconvenience", "latent_margin"}, "one descriptor copy fewer, enough others")
 
     def test_privacy_threats_are_privacy_loss(self):
         r = self.row("T-COORD-PRIVACY-BACKEND@coord1")
@@ -1032,7 +1108,7 @@ class Variants(Base):
         def drop(d):
             next(l for l in d["locations"] if l["id"] == "loc-home")["near"] = []
         r = by_id(variant(drop))["T-LOC-NATURAL-DISASTER@loc-home"]
-        self.assertNotIn("d2b", effect(r, "lost"))
+        self.assertNotIn("d2b", effect(r, "destroyed"))
         self.assertNotIn("lockout_temporary", outcomes(r, "w-multi"))
         self.assertIn("latent_no_margin", outcomes(r, "w-multi"))
 
@@ -1061,7 +1137,7 @@ class Variants(Base):
             d["backups"].append({"id": "b1-copy", "name": "s1 copy", "medium": "paper", "stored_in": {"location": "loc-bank"}, "items": [{"subject": {"seed": "s1"}, "format": "words"}]})
         r = by_id(variant(add))["T-LOC-FIRE@loc-home"]
         self.assertNotIn("main_loss", outcomes(r, "w-single"))
-        self.assertEqual(outcomes(r, "w-single"), {"inconvenience"})
+        self.assertEqual(outcomes(r, "w-single"), {"inconvenience", "latent_no_margin"}, "the copy at the bank is the last one")
 
     def test_a_tripwire_elsewhere_does_not_watch_the_home(self):
         self.premise(self.addresses("M-D-TRIPWIRE", "T-LOC-ATTACK-LOCAL", "detects"), "tripwire detects local attacks")
@@ -1093,21 +1169,24 @@ class DelayedPolicy(Base):
     def timelock_entry(self, row):
         return next((m for m in row["V"]["mechanisms"] if m["mechanism"] == "M-P-REFRESH-TIMELOCK"), None)
 
+    ROW = "T-LOC-ATTACK-LOCAL@loc-far"      # the fallback key and a registered copy of the descriptor are both at the relative's
+
     def test_a_policy_that_opens_after_its_delay_is_not_an_immediate_theft(self):
-        r = self.row("T-DEV-LOST-OR-STOLEN@d2f")
+        r = self.row(self.ROW)
         self.assertEqual(exploits(r, "w-multi", "main_loss"), {"after_delay"})
-        self.assertEqual(exploits(self.row("T-DEV-LEAKS-KEY@d3a"), "w-spread", "main_loss"), {"immediate"})
+        self.assertEqual(outcomes(self.row("T-DEV-LOST-OR-STOLEN@d2f"), "w-multi") & {"main_loss"}, set(), "the key alone, without the custom descriptor, is not enough")
+        self.assertEqual(exploits(self.row("T-DEV-LEAKS-KEY@d1"), "w-single", "main_loss"), {"immediate"})
 
     def test_refreshing_the_funds_is_a_barrier_only_against_the_delayed_policy(self):
-        self.premise(self.addresses("M-P-REFRESH-TIMELOCK", "T-WALLET-TIMELOCK-LAPSE", "reduces"), "refreshing reduces the timelock lapse")
-        entry = self.timelock_entry(self.row("T-DEV-LOST-OR-STOLEN@d2f"))
+        self.premise("after_delay" in self.cat.mechanisms["M-P-REFRESH-TIMELOCK"].get("barrier_for", []), "refreshing is a barrier against delayed policies")
+        entry = self.timelock_entry(self.row(self.ROW))
         self.assertEqual((entry["strength"], entry.get("barrier")), (2, True))
         self.assertIsNone(self.timelock_entry(self.row("T-DEV-LOST-OR-STOLEN@d1")))
 
     def test_without_the_refresh_the_delayed_policy_is_unprotected(self):
-        self.premise(self.addresses("M-P-REFRESH-TIMELOCK", "T-WALLET-TIMELOCK-LAPSE", "reduces"), "refreshing reduces the timelock lapse")
+        self.premise("after_delay" in self.cat.mechanisms["M-P-REFRESH-TIMELOCK"].get("barrier_for", []), "refreshing is a barrier against delayed policies")
         v = by_id(variant(lambda d: d.update(practices=[p for p in d["practices"] if p["mechanism"] != "M-P-REFRESH-TIMELOCK"])))
-        now, without = self.row("T-DEV-LOST-OR-STOLEN@d2f"), v["T-DEV-LOST-OR-STOLEN@d2f"]
+        now, without = self.row(self.ROW), v[self.ROW]
         self.assertIsNone(self.timelock_entry(without))
         self.assertEqual((now["V"]["prevention"], without["V"]["prevention"]), (2, 1), "the barrier is gone, the other preventions remain")
 
@@ -1131,11 +1210,11 @@ class Travel(Base):
 
     def test_a_journey_is_the_cheapest_order_of_its_stops(self):
         S = setup_of(self.declared)
-        self.assertEqual(S._journey(["loc-w3a", "loc-w3b", "loc-w3c"]), 65, "b - a - c is 25 + 40")
-        self.assertEqual(S._journey(["loc-w3a"]), 0)
+        self.assertEqual(S.journey(["loc-w3a", "loc-w3b", "loc-w3c"]), 65, "b - a - c is 25 + 40")
+        self.assertEqual(S.journey(["loc-w3a"]), 0)
 
     def test_a_person_who_cannot_complete_a_quorum_alone_needs_infinite_time(self):
-        self.assertEqual(self.S.quorum_minutes("carol"), model.INF)
+        self.assertEqual(rating.quorum_minutes(self.S, "carol"), INF)
 
     def test_the_quorum_time_is_the_cheapest_journey_between_enough_signers(self):
         def mutate(d):
@@ -1143,7 +1222,9 @@ class Travel(Base):
             for l in d["locations"]:
                 if l["id"] in ("loc-w3a", "loc-w3b"):
                     l["access"].append("carol")
-        self.assertEqual(setup_of(mutate).quorum_minutes("carol"), 25, "two of four signers: the two closest places")
+            d["backups"].append({"id": "b-desc-w3a", "name": "descriptor at A", "medium": "paper", "stored_in": {"location": "loc-w3a"},
+                                 "items": [{"subject": {"descriptor": "desc-w3"}, "format": "text"}]})
+        self.assertEqual(rating.quorum_minutes(setup_of(mutate), "carol"), 25, "two of four signers at the two closest places, with the descriptor at one of them")
 
 
 class ConcealedPlaces(Base):
@@ -1153,13 +1234,13 @@ class ConcealedPlaces(Base):
 
     def test_an_intruder_in_a_home_does_not_find_what_is_in_a_concealed_place(self):
         S = setup_of(self.hide_safe)
-        found = S.intrusion_contents("loc-home")
+        found = access.select(S, "intrusion_contents", "loc-home")
         self.assertIn("d1", found)
         self.assertNotIn("d2a", found)
-        self.assertIn("d2a", self.S.intrusion_contents("loc-home"), "a safe is in view")
+        self.assertIn("d2a", access.select(self.S, "intrusion_contents", "loc-home"), "a safe is in view")
 
     def test_an_intruder_in_the_concealed_place_finds_it_together_with_what_is_in_view_above(self):
-        found = setup_of(self.hide_safe).intrusion_contents("loc-safe")
+        found = access.select(setup_of(self.hide_safe), "intrusion_contents", "loc-safe")
         self.assertTrue({"d2a", "b2a", "d1"} <= set(found))
 
 
@@ -1445,7 +1526,7 @@ class Report(Base):
     def test_the_diagram_structure_has_a_card_for_every_entity_and_only_valid_links(self):
         st = self.data["structure"]
         ids = {n["id"] for n in st["nodes"]}
-        self.assertEqual(ids, {i for i in self.S.by_id if not i.startswith(model.PERSON_PLACE)}, "what a person carries is shown inside the person")
+        self.assertEqual(ids, set(self.S.by_id), "what a person carries is shown inside the person")
         held = {n["id"]: n["in"] for n in st["nodes"] if "in" in n}
         self.assertEqual(held["bk-head"], "alice")
         policies = {f"{w['id']}#{i}" for w in self.S.of("Wallet") for i in range(1, len(w["spending_policies"]) + 1)}
@@ -1492,7 +1573,7 @@ class AccessRights(Base):
         return {a["person"]: a["result"] for a in self.ev.access(st) if a["wallet"] == wallet}
 
     def test_rights_are_one_entry_per_set_of_people_and_wallet(self):
-        rights = {(tuple(sorted(r["people"])), r["wallet"]): r["after"] for r in self.S.rights()}
+        rights = {(tuple(sorted(r["people"])), r["wallet"]): r["after"] for r in self.ev.rights()}
         self.assertEqual(rights[(("alice", "bob"), "w-spread")], 0)
         self.assertEqual(rights[(("dave",), "w-multi")], 52000)
         self.assertEqual(rights[(("alice", "dave"), "w-pin")], 0)
@@ -1501,7 +1582,7 @@ class AccessRights(Base):
 
     def test_the_fixture_gives_the_people_what_they_should_have_and_no_more(self):
         self.assertEqual([w for w in BASE["result"]["warnings"] if w.startswith("rights")], [])
-        self.assertTrue(all(a["result"] == "ok" for a in self.ev.access(effects.State())))
+        self.assertTrue(all(a["result"] == "ok" for a in self.ev.access(access.State())))
 
     def test_a_right_that_the_setup_does_not_give_is_reported(self):
         later = variant(lambda d: self.person_in(d, "dave")["may_spend"][0].update(after_blocks=10000))
@@ -1605,10 +1686,10 @@ class DiagramFocus(Base):
         self.assertEqual({o["outcome"] for o in rows["T-PERSON-DEATH@alice"]["outcomes"]}, {"main_loss"})
         self.assertEqual(rows["T-PERSON-DEATH@alice"]["S"]["value"], 4)
 
-    def test_a_hit_on_a_host_touches_the_coordinator_that_runs_on_it(self):
-        st = effects.State()
-        effects.hit(BASE["S"], st, "pc1", "disclosed")
-        self.assertIn("coord1", st.touched)
+    def test_a_hit_on_a_host_hits_the_coordinator_that_runs_on_it(self):
+        st = access.State()
+        access.hit(BASE["S"], st, "pc1", "disclosed")
+        self.assertTrue(st.has("coord1", "disclosed"))
 
     def test_a_coordinator_lists_the_descriptors_of_its_wallets_for_the_diagram(self):
         nodes = {n["id"]: n for n in report.build_data(BASE["result"], BASE["S"], BASE["cat"])["structure"]["nodes"]}
@@ -1627,12 +1708,11 @@ class DiagramFocus(Base):
         self.assertIn(["coord", "implicit:w1", "stores"], data["edges"])
 
     def test_a_stolen_host_reveals_the_wallets_of_its_coordinator_unless_a_password_protects_them(self):
-        ev = effects.Evaluator(BASE["S"])
+        ev = outc.Evaluator(BASE["S"])
 
         def privacy(host, known=()):
-            st = effects.State()
-            effects.hit(BASE["S"], st, host, "disclosed")
-            st.secret_known.update(known)
+            st = state(disclosed={host}, secret_known=known)
+            access.hit(BASE["S"], st, host, "disclosed")
             return {o["wallet"] for o in ev.evaluate(st) if o["outcome"] == "privacy_loss"}
         self.assertNotIn("w-multi", privacy("pc1"), "coord1 has a password")
         self.assertIn("w-multi", privacy("pc1", ["pin-coord"]))
@@ -1640,9 +1720,9 @@ class DiagramFocus(Base):
 
     def test_the_effects_list_everything_the_attacker_gets_to_know(self):
         host = self.row("T-PERSON-COERCION@alice")
-        self.assertIn("desc-w3", effect(host, "secret_known"), "coord2 has no password")
+        self.assertIn("desc-w3", effect(host, "known"), "coord2 has no password")
         host = self.row("T-LOC-ATTACK-LOCAL@loc-home")
-        self.assertNotIn("desc-w2", effect(host, "secret_known"), "coord1 has a password")
+        self.assertNotIn("desc-w2", effect(host, "known"), "coord1 has a password")
 
     def test_nobody_left_to_spend_a_wallet_is_no_loss(self):
         result = analyze.analyze(HERE / "scenarios" / "00_single_sig_hot_wallet.json", what_if=False)
@@ -1666,7 +1746,7 @@ class DiagramFocus(Base):
 class RightsReport(Base):
     def test_every_right_is_compared_with_what_the_intact_setup_delivers(self):
         rep = BASE["result"]["rights"]
-        self.assertEqual(len(rep["rights"]), len(BASE["S"].rights()))
+        self.assertEqual(len(rep["rights"]), len(BASE["ev"].rights()))
         for r in rep["rights"]:
             self.assertIn(r["state"], ("ok", "later", "never", "earlier"))
             self.assertEqual(r["state"] == "ok", r["got"] == r["after"])
@@ -1805,26 +1885,26 @@ class Feedback(Base):
 
 class ComputingDevices(Base):
     def test_what_a_person_carries_is_in_a_place_only_that_person_reaches(self):
-        self.assertEqual(self.S.loc_of("laptop2"), "person:alice")
-        self.assertEqual(self.S.loc_of("bk-head"), "person:alice")
+        self.assertEqual(self.S.place("laptop2"), "alice")
+        self.assertEqual(self.S.place("bk-head"), "alice")
         self.assertIn("laptop2", self.S.reachable_entities("alice"))
         self.assertNotIn("laptop2", self.S.reachable_entities("bob"))
-        self.assertNotIn("person:alice", self.S.ids_of("Location"), "the place is not declared and has no location threats")
+        self.assertNotIn("alice", self.S.ids_of("Location"), "a person is a place of their own, not a location")
 
     def test_amnesia_wipes_the_memory_but_not_the_devices_a_person_carries(self):
         r = self.row("T-PERSON-AMNESIA@alice")
-        self.assertEqual(effect(r, "lost"), {"bk-head"})
+        self.assertEqual(effect(r, "destroyed"), {"bk-head"})
 
     def test_death_wipes_the_memory_and_the_person_but_leaves_the_devices(self):
         r = self.row("T-PERSON-DEATH@alice")
-        self.assertEqual(effect(r, "lost"), {"alice", "bk-head"})
-        self.assertNotIn("laptop2", effect(r, "lost"))
+        self.assertEqual(effect(r, "destroyed"), {"alice", "bk-head"})
+        self.assertNotIn("laptop2", effect(r, "destroyed"))
 
     def test_malware_on_a_computing_device_hits_the_coordinator_that_runs_on_it(self):
         r = self.row("T-DEV-MALWARE@pc1")
-        self.assertEqual(effect(r, "controlled"), {"pc1"})
-        self.assertIn("tamper", set(r["effects"]["wallet_flags"]["w-multi"]))
-        self.assertNotIn("w-single", r["effects"]["wallet_flags"])
+        self.assertEqual(effect(r, "controlled"), {"pc1", "coord1"})
+        self.assertEqual(effect(r, "tampered"), {"w-multi"}, "the wallets the coordinator on it handles can be manipulated")
+        self.assertEqual(exploits(r, "w-multi", "main_loss"), {"at_use"})
 
     def test_a_hot_wallet_is_lost_with_the_phone(self):
         result = analyze.analyze(HERE / "scenarios" / "00_single_sig_hot_wallet.json", what_if=False)
