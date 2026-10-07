@@ -109,6 +109,10 @@ td.rt[data-f] { cursor: pointer; }
 .chipov { display: inline-block; background: #fff; border: 1px solid #ce93d8; border-radius: 10px; padding: 0 6px; margin-left: 4px; font-size: 11px; }
 .ask { margin: 4px 0; padding: 3px 0; border-top: 1px solid #eee; }
 nav #fbexport { margin-left: 8px; font-size: 11px; }
+nav label.dm { margin-left: 8px; font-size: 11px; cursor: pointer; }
+/* dark mode: invert the page, then invert pictures back */
+html.dark { filter: invert(1) hue-rotate(180deg); background: #fff; }
+html.dark img, html.dark svg image { filter: invert(1) hue-rotate(180deg); }
 table.mt table.mt { margin: 4px 0; border-top: 1px solid #ddd; }
 table.mt summary { cursor: pointer; color: #1565c0; }
 table.mt th { top: auto; position: static; }
@@ -144,6 +148,7 @@ ul.steps small { display: block; }
     <a href="#measures" data-tab="measures">Measures</a>
     <a href="#access" data-tab="access">Access</a>
     <a class="newtab" id="newtab" target="_blank">open this view in a new tab</a>
+    <label class="dm" title="Dark colors for the page"><input type="checkbox" id="dark"> dark mode</label>
     <button id="fbexport" title="Save all overrides (ratings set by hand and answers to questions).">save overrides (0)</button>
   </nav>
 </header>
@@ -288,6 +293,12 @@ function cmp(a, b) {
   const x = KEY[state.col](a), y = KEY[state.col](b);
   return (x < y ? -1 : x > y ? 1 : 0) * state.dir
     || order[a.e[0]] - order[b.e[0]] || a.tn.localeCompare(b.tn) || a.eff.localeCompare(b.eff);
+}
+const DARK_KEY = 'threat-analysis-dark';
+function setDark(on) {
+  document.documentElement.classList.toggle('dark', on);
+  $('#dark').checked = on;
+  try { localStorage.setItem(DARK_KEY, on ? '1' : '0'); } catch (e) { /* no storage */ }
 }
 // ---------------------------------------------------------------- overrides: ratings set by hand and answers to questions
 // One mechanism for both: an override names a line (row + field, the final value) or a question (ask, the base likelihood).
@@ -841,6 +852,7 @@ function openDetail(r) {
     <div class="legend lgrows">${legendHtml(true)}</div></div>
     <div id="svgbox" class="popbox">${svg}</div>
     <script>${script}<\/script></body>`);
+  w.document.documentElement.classList.toggle('dark', document.documentElement.classList.contains('dark'));
   w.document.close();
 }
 
@@ -989,6 +1001,10 @@ function init() {
   $('#notesum').textContent = `${DATA.asks.length} questions for the owner, ${DATA.warnings.length} warnings`;
   $('#notebody').innerHTML = notesHtml();
   $('#fbexport').addEventListener('click', exportFb);
+  $('#dark').addEventListener('input', ev => setDark(ev.target.checked));
+  let wanted = null;
+  try { wanted = localStorage.getItem(DARK_KEY); } catch (e) { /* no storage */ }
+  setDark(wanted === null ? matchMedia('(prefers-color-scheme: dark)').matches : wanted === '1');
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closePop(); });
   const opt = (v, t) => `<option value="${v}">${t}</option>`;
   $('#minrisk').innerHTML = [0, 1, 2, 3, 4].map(i => opt(i, `${i} ${RISK[i]}`)).join('');
