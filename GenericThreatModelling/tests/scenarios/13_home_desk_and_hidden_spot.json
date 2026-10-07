@@ -26,6 +26,6 @@
     { "id": "b2", "name": "Seed 2, paper", "medium": "paper", "stored_in": { "location": "loc-bank" }, "items": [{ "subject": { "seed": "s2" }, "format": "words" }] }
   ],
   "computing_devices": [{ "id": "laptop", "name": "Laptop", "kind": "laptop", "use": "regular", "stored_in": { "location": "loc-home" } }],
-  "coordinators": [{ "id": "coord", "name": "Coordinator", "product": "Sparrow", "runs_on": "laptop" }],
-  "wallets": [{ "id": "w1", "name": "Multisig 2 of 2", "coordinator": "coord", "descriptor": "desc1", "spending_policies": [{ "signers": [{ "seed": "s1" }, { "seed": "s2" }], "threshold": 2 }] }]
+  "coordinators": [{ "id": "coord", "name": "Coordinator", "product": "Sparrow", "runs_on": "laptop", "stores_descriptors": ["desc1"] }],
+  "wallets": [{ "id": "w1", "name": "Multisig 2 of 2", "spending_policies": [{ "signers": [{ "seed": "s1" }, { "seed": "s2" }], "threshold": 2 }] }]
 }

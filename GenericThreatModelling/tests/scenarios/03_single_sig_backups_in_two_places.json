@@ -10,12 +10,13 @@
   "travel_times": [{ "from": "loc-home", "to": "loc-bank", "minutes": 30 }],
   "devices": [{ "id": "d1", "name": "Device", "use": "regular", "vendor": "BitBox", "model": "BitBox02", "stored_in": { "location": "loc-home" } }],
   "seeds": [{ "id": "s1", "name": "Seed", "devices": ["d1"] }],
+  "descriptors": [{ "id": "desc-w1", "name": "Descriptor of Wallet", "wallet": "w1" }],
   "backups": [
     { "id": "b1", "name": "Seed, paper at home", "medium": "paper", "stored_in": { "location": "loc-home" }, "items": [{ "subject": { "seed": "s1" }, "format": "words" }] },
     { "id": "b2", "name": "Seed, paper in the box", "medium": "paper", "stored_in": { "location": "loc-bank" }, "items": [{ "subject": { "seed": "s1" }, "format": "words" }] }
   ],
   "computing_devices": [{ "id": "laptop", "name": "Laptop", "kind": "laptop", "use": "regular", "stored_in": { "location": "loc-home" } }],
-  "coordinators": [{ "id": "coord", "name": "Coordinator", "product": "Sparrow", "runs_on": "laptop" }],
-  "wallets": [{ "id": "w1", "name": "Wallet", "coordinator": "coord", "spending_policies": [{ "signers": [{ "seed": "s1" }], "threshold": 1 }] }],
+  "coordinators": [{ "id": "coord", "name": "Coordinator", "product": "Sparrow", "runs_on": "laptop", "stores_descriptors": ["desc-w1"] }],
+  "wallets": [{ "id": "w1", "name": "Wallet", "spending_policies": [{ "signers": [{ "seed": "s1" }], "threshold": 1 }] }],
   "practices": [{ "id": "p-backup-verify", "mechanism": "M-D-BACKUP-VERIFY", "scope": ["b1", "b2"], "comment": "Assumed." }]
 }

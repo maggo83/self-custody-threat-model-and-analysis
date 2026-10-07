@@ -4,6 +4,7 @@ from itertools import combinations
 
 from model import INF, PLAN
 from ontology import CREDENTIALS, is_a
+from predicates import descriptor_known
 from vocab import LEAK
 
 
@@ -66,7 +67,9 @@ def hit(S, st, eid, kind, malicious=True):
         else:
             st.controlled.add(eid)
         for co in S.coordinators_on(eid):
-            apply_impact(S, st, co, {"on": "wallets", "kind": kind}, malicious)
+            st.touched.add(co)
+            if kind not in LEAK:                # what a leak gives away follows from attacker_secrets
+                apply_impact(S, st, co, {"on": "wallets", "kind": kind}, malicious)
     elif c == "Backup":
         if kind == "destroyed":
             st.lost.add(eid)
@@ -102,6 +105,8 @@ def hit(S, st, eid, kind, malicious=True):
     elif c in ("Coordinator", "TamperEvidentBag", "BagStrip"):
         if kind not in LEAK:
             st.touched.add(eid)
+        elif c == "Coordinator":
+            st.disclosed.add(eid)
     elif c == "Plan":
         if kind in LEAK:
             st.privacy = True
@@ -184,6 +189,10 @@ class Owner:
     def reachable(self, eid):
         return self.ok(eid) and self.S.loc_of(eid) in self.reach
 
+    def coordinator_usable(self, cid, seen):
+        co = self.S.ent(cid)
+        return self.reachable(co["runs_on"]) and (not co.get("password") or self.obtain(co["password"], seen))
+
     def obtain(self, sid, seen=frozenset()):
         S, st = self.S, self.st
         if sid in st.secret_lost or sid in st.tampered or not self.ok(sid) or (self.strict and sid in st.secret_blocked):
@@ -207,7 +216,7 @@ class Owner:
         if not res and S.cls(sid) == "Seed":
             res = any(self.device_usable(d, seen) for d in S.ent(sid).get("devices", []))
         if not res and S.cls(sid) == "Descriptor":
-            res = any(self.device_usable(d, seen) for d in S.devices_storing(sid))
+            res = any(self.device_usable(d, seen) for d in S.devices_storing(sid)) or any(self.coordinator_usable(c, seen) for c in S.coordinators_storing(sid))
         if not seen - {sid}:
             self._cache[sid] = res
         return res
@@ -241,8 +250,8 @@ class Owner:
         return tuple(sum(self.signer_ok(sg) for sg in p["signers"]) for p in self.S.ent(wid)["spending_policies"])
 
     def profile(self, wid):
-        """Signers per policy and whether a descriptor copy exists: what redundancy is left."""
-        return self.counts(wid) + (int(self.descriptor_copy(wid)),)
+        """Signers per policy and whether a descriptor copy exists (only where the keys do not give the descriptor): what redundancy is left."""
+        return self.counts(wid) + (int(self.S.needs_registration(wid) and self.descriptor_copy(wid)),)
 
 
 def tier(S, st, wid):
@@ -272,12 +281,19 @@ def attacker_secrets(S, st):
         n = len(known)
         for d in st.controlled:
             known.update(S.seeds_on(d))
+            for co in S.coordinators_on(d):
+                known.update(S.ent(co).get("stores_descriptors", []))
         for e in st.disclosed:
             if is_a(S.cls(e), "Device"):
                 pin = S.ent(e).get("pin")
                 if not pin or pin in known:
                     known.update(S.seeds_on(e))
                     known.update(S.ent(e).get("stores_descriptors", []))
+                for co in S.coordinators_on(e):
+                    if not S.ent(co).get("password") or S.ent(co)["password"] in known:
+                        known.update(S.ent(co).get("stores_descriptors", []))
+            elif S.cls(e) == "Coordinator":
+                known.update(S.ent(e).get("stores_descriptors", []))
             elif S.cls(e) == "Backup":
                 for item in S.ent(e)["items"]:
                     enc = item.get("encrypted_with")
@@ -501,7 +517,7 @@ class Evaluator:
                     add("lockout_temporary" if main else "inconvenience", "usable only after a delay, repair or reconstruction")
             if "blocked" in flags:
                 add("lockout_temporary" if main else "inconvenience", "wallet blocked by the threat")
-            if "privacy" in flags or st.privacy or (S.ent(w).get("descriptor") in known and not self.entitled(st, w)):
+            if "privacy" in flags or st.privacy or (descriptor_known(S, w, known) and not self.entitled(st, w)):
                 add("privacy_loss", "holdings or structure become known")
             if "soft" in flags or (S.deps(w) & affected):
                 add("inconvenience", "a part must be repaired or replaced")

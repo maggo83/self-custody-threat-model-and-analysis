@@ -124,7 +124,13 @@ def quorum_needs_travel(S, pid):
     return S.quorum_minutes(pid) >= S.cat.ratings["protection"]["travel_minutes"][0]["at_least"]
 
 
+def wallet_has_coordinator(S, wid):
+    """Some coordinator has the wallet's descriptor, explicitly or because it runs where the seeds are."""
+    return bool(S.coordinators_of(wid))
+
+
 REGISTRY = {f.__name__: f for f in (
+    wallet_has_coordinator,
     has_delayed_policy, has_encrypted_items, supply_chain_direct, has_spare_signers, requires_several_signers,
     seed_used_with_passphrase, strip_and_bag_reachable_together, strip_and_bag_stored_apart, signers_stored_apart,
     secret_parts_stored_apart, has_copies_in_different_locations, wallet_descriptors_registered,
@@ -136,16 +142,35 @@ def holds(S, predicate, eid):
     return bool(REGISTRY[predicate["name"]](S, eid))
 
 
+def signers_known(S, known):
+    """(seed, passphrase) pairs whose public key the attacker has: from a known seed, or from a known explicit descriptor that contains it."""
+    out = set()
+    for w in S.ids_of("Wallet"):
+        pairs = {(sg["seed"], sg.get("passphrase")) for _, _, sg in S.signers(w)}
+        out |= {p for p in pairs if p[0] in known and (p[1] is None or p[1] in known)}
+        if S.ent(w).get("descriptor") in known:
+            out |= pairs
+    return out
+
+
+def descriptor_known(S, wid, known, signers=None):
+    """The attacker has the wallet's descriptor: an explicit copy, or, for a default wallet, the public keys of all its signers."""
+    if S.ent(wid).get("descriptor") in known:
+        return True
+    if S.descriptor_is_custom(wid):
+        return False
+    signers = signers_known(S, known) if signers is None else signers
+    return all((sg["seed"], sg.get("passphrase")) in signers for _, _, sg in S.signers(wid))
+
+
 def linking_descriptor(S, wid, known):
-    """The attacker knows a descriptor of another wallet that contains a key of this wallet, or the plan."""
+    """The attacker knows a descriptor, explicit or derived, of another wallet that contains a key of this wallet, or the plan."""
     if PLAN in known:
         return True
     mine = {(sg["seed"], sg.get("passphrase")) for _, _, sg in S.signers(wid)}
-    for w in S.ids_of("Wallet"):
-        d = S.ent(w).get("descriptor")
-        if w != wid and d in known and mine & {(sg["seed"], sg.get("passphrase")) for _, _, sg in S.signers(w)}:
-            return True
-    return False
+    signers = signers_known(S, known)
+    return any(w != wid and mine & {(sg["seed"], sg.get("passphrase")) for _, _, sg in S.signers(w)} and descriptor_known(S, w, known, signers)
+               for w in S.ids_of("Wallet"))
 
 
 KNOWLEDGE = {"linking_descriptor": linking_descriptor}

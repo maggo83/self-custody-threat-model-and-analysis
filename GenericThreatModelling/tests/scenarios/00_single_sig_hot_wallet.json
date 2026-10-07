@@ -8,5 +8,5 @@
   "seeds": [{ "id": "s1", "name": "Seed", "devices": ["phone"] }],
   "backups": [],
   "coordinators": [{ "id": "coord", "name": "Wallet app", "product": "Blockstream Green", "runs_on": "phone" }],
-  "wallets": [{ "id": "w1", "name": "Wallet", "coordinator": "coord", "spending_policies": [{ "signers": [{ "seed": "s1" }], "threshold": 1 }] }]
+  "wallets": [{ "id": "w1", "name": "Wallet", "spending_policies": [{ "signers": [{ "seed": "s1" }], "threshold": 1 }] }]
 }

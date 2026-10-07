@@ -26,7 +26,7 @@ def secrets_in(S, eid):
             out |= {"@plan" if k == "plan" else v for k, v in item["subject"].items()}
         return out
     if is_a(c, "Device"):
-        return set(S.seeds_on(eid)) | set(S.ent(eid).get("stores_descriptors", []))
+        return set(S.seeds_on(eid)) | set(S.ent(eid).get("stores_descriptors", [])) | {d for co in S.coordinators_on(eid) for d in S.ent(co).get("stores_descriptors", [])}
     return set()
 
 
@@ -58,6 +58,23 @@ def spendable(S, pid):
     return out
 
 
+def implicit_id(wid):
+    return f"implicit:{wid}"
+
+
+def coordinator_holds(S, w, cid):
+    """The descriptors a coordinator has: kept explicitly, or derived on its host from the seeds that are there (implicit)."""
+    kept, out = S.ent(cid).get("stores_descriptors", []), []
+    for wal in S.of("Wallet"):
+        did = wal.get("descriptor")
+        if did in kept:
+            out.append({"id": did, "name": w.name(did), "c": "Descriptor", "tip": f"descriptor {w.name(did)} is kept by this coordinator"})
+        elif S.has_descriptor(cid, wal["id"]):
+            out.append({"id": did or implicit_id(wal["id"]), "name": w.name(did) if did else f"Descriptor of {w.name(wal['id'])}", "c": "Descriptor", "implicit": True,
+                        "tip": f"the descriptor of {w.name(wal['id'])} is derived on this host from the seeds that are there"})
+    return out
+
+
 def structure(S, w, images=False):
     """The setup as plain data for the diagram: cards, links, and what each person can reach."""
     def sub(c, e):
@@ -83,7 +100,11 @@ def structure(S, w, images=False):
         if eid in of:
             node["img"], node["imgmatch"] = of[eid]["file"], of[eid]["match"]
         if is_a(c, "Device"):
-            node["holds"] = [{"id": s, "name": w.name(s), "c": S.cls(s)} for s in S.seeds_on(eid) + list(e.get("stores_descriptors", []))]
+            node["holds"] = [{"id": s, "name": w.name(s), "c": S.cls(s),
+                              "tip": f"{'seed' if S.cls(s) == 'Seed' else 'descriptor'} {w.name(s)} is {'loaded' if S.cls(s) == 'Seed' else 'stored'} on this device"}
+                             for s in S.seeds_on(eid) + list(e.get("stores_descriptors", []))]
+        if c == "Coordinator":
+            node["holds"] = coordinator_holds(S, w, eid)
         if c == "Person":
             node["may"] = w.rights_of(eid)
         if c == "Backup":
@@ -101,6 +122,8 @@ def structure(S, w, images=False):
             node["policies"] = [f"{p['threshold']} of {len(p['signers'])}, " + (f"after {p['delay_blocks']} blocks" if p["delay_blocks"] else "at once")
                                 for p in e["spending_policies"]]
         nodes.append(node)
+    nodes += [{"id": implicit_id(wal["id"]), "c": "Descriptor", "name": f"Descriptor of {w.name(wal['id'])}", "sub": "derived from the keys", "implicit": True}
+              for wal in S.of("Wallet") if "descriptor" not in wal]
     nodes.sort(key=lambda n: n["c"] == "Wallet" and n["tripwire"])
     edges = []
     for loc in S.of("Location"):
@@ -111,9 +134,7 @@ def structure(S, w, images=False):
                 edges.append([f"{wal['id']}#{i}", sg["seed"], "signer"])
                 if "passphrase" in sg:
                     edges.append([f"{wal['id']}#{i}", sg["passphrase"], "passphrase"])
-        for key, kind in (("descriptor", "descriptor"), ("coordinator", "coordinator")):
-            if key in wal:
-                edges.append([wal["id"], wal[key], kind])
+        edges.append([wal["id"], wal.get("descriptor", implicit_id(wal["id"])), "descriptor"])
         edges.append(["@plan", wal["id"], "plan"])
     for seed in S.of("Seed"):
         edges += [[seed["id"], d, "loaded"] for d in seed.get("devices", [])]
@@ -122,6 +143,7 @@ def structure(S, w, images=False):
         if "pin" in dev:
             edges.append([dev["id"], dev["pin"], "pin"])
     for c in S.of("Coordinator"):
+        edges += [[c["id"], h["id"], "stores"] for h in coordinator_holds(S, w, c["id"])]
         if "password" in c:
             edges.append([c["id"], c["password"], "pin"])
     for bag in S.of("TamperEvidentBag"):

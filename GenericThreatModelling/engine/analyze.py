@@ -153,6 +153,9 @@ def analyze(setup_path, progress=None, check_only=False, what_if=True, given=Non
         if peers:
             row["common_cause"] = peers
         affected = st.summary()
+        known = sorted(k for k in effects.attacker_secrets(S, st) if k in S.by_id)
+        if known:
+            affected["secret_known"] = known        # all the attacker gets, not only what leaked directly
         if affected:
             row["effects"] = affected
         row["outcomes"] = outcomes

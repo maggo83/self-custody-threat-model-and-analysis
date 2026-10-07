@@ -224,21 +224,19 @@ def preflight(data, cat):
             if p["threshold"] > len(p["signers"]):
                 errors.append(f"wallet {w['id']}: threshold {p['threshold']} exceeds {len(p['signers'])} signers")
     held = {b_item["subject"]["descriptor"] for b in data.get("backups", []) for b_item in b["items"] if "descriptor" in b_item["subject"]}
-    held |= {x for d in data.get("devices", []) for x in d.get("stores_descriptors", [])}
+    held |= {x for coll in ("devices", "computing_devices", "coordinators") for d in data.get(coll, []) for x in d.get("stores_descriptors", [])}
     descriptors_of = {}
     for d in data.get("descriptors", []):
         descriptors_of.setdefault(d["wallet"], []).append(d["id"])
         if d["id"] not in held:
-            errors.append(f"descriptor {d['id']}: kept nowhere; it needs a backup copy or a registration on a signing device")
+            errors.append(f"descriptor {d['id']}: kept nowhere; it needs a backup copy, a registration on a device or a coordinator that has it")
     for w in data["wallets"]:
         signers = {(sg["seed"], sg.get("passphrase")) for pol in w["spending_policies"] for sg in pol["signers"]}
         mine = descriptors_of.get(w["id"], [])
         if len(mine) > 1:
             errors.append(f"wallet {w['id']} has {len(mine)} descriptors; a wallet has at most one")
-        if (w.get("definition") == "custom" or len(signers) > 1) and "descriptor" not in w:
+        if (w.get("definition") == "custom" or len(signers) > 1) and not mine:
             errors.append(f"wallet {w['id']} has several signers or a custom definition and needs a descriptor")
-        if "descriptor" in w and w["descriptor"] not in mine:
-            errors.append(f"wallet {w['id']}: descriptor {w['descriptor']} does not name this wallet")
     for b in data.get("backups", []):
         where = f"backup {b['id']}"
         if b["medium"] == "memory" and "person" not in b["stored_in"]:
@@ -300,6 +298,12 @@ def preflight(data, cat):
         import predicates
         from model import Setup
         S = Setup(data, cat)
+        for w in S.ids_of("Wallet"):
+            if not S.coordinators_of(w):
+                warnings.append(f"wallet {w}: no coordinator has its descriptor, so nobody can build transactions for it; list the descriptor in `stores_descriptors` of a coordinator")
+        for c in S.of("Coordinator"):
+            if not S.ent(c["runs_on"])["online"]:
+                warnings.append(f"coordinator {c['id']} runs on {c['runs_on']}, which is offline; a coordinator queries the network")
         for d in S.of("SigningDevice"):
             support, stored = S.registration_support(d["id"]), d.get("stores_descriptors", [])
             name, wallets = f"device {d['id']} ({d['vendor']} {d['model']})", S.registration_wallets(d["id"])

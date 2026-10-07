@@ -102,7 +102,7 @@ classDiagram
     Signer "*" --> "1" Seed
     Signer "*" --> "0..1" Passphrase : uses
     Wallet "1" -- "0..1" Descriptor
-    Wallet "*" --> "0..1" Coordinator : managed with
+    Coordinator "*" --> "*" Descriptor : has
     Seed "*" -- "*" SigningDevice : loaded on
     Seed "*" -- "*" ComputingDevice : loaded on (hot)
     SigningDevice "*" --> "0..1" PinPassword : pin
@@ -138,7 +138,7 @@ classDiagram
 
     note for Plan "Also contains all people, locations, bags, strips, devices, seeds, passphrases, PINs, descriptors, coordinators and backups"
     note for TamperEvidentBag "stored in means exactly one of Location or TamperEvidentBag, for Backup, SigningDevice, BagStrip and bag alike; Backup and ComputingDevice can also be kept in a Person (see Person). Bags nest, no cycles."
-    note for Wallet "descriptor is mandatory for several signers or a custom definition; coordinator is mandatory; definition is default or custom"
+    note for Wallet "a descriptor entity is mandatory for several signers or a custom definition; definition is default or custom"
     note for Signer "seed is required, passphrase optional"
     note for BackupItem "subject is exactly one of a Secret or the Plan"
 ```
@@ -183,7 +183,9 @@ A PIN or a password; deliberately not distinguished. Referenced by `SigningDevic
 
 ### Descriptor
 
-Public wallet configuration: the set of all xpubs plus the script and derivation. Format and encryption are stated per Backup item, not here. A copy is a Backup item, or a registration on a SigningDevice (`stores_descriptors`), from which it can usually be exported again. A wallet has at most one descriptor. It is mandatory for a wallet with several signers or a custom definition, and every descriptor must have at least one copy somewhere.
+Public wallet configuration: the set of all xpubs plus the script and derivation. Every wallet has one. Format and encryption are stated per Backup item, not here. A copy is a Backup item, a registration on a SigningDevice or ComputingDevice (`stores_descriptors`), or a copy held by a Coordinator (`stores_descriptors`).
+
+Only copies that are kept where the seed is not also available are written in the setup. The default descriptor of a wallet is trivially derived from the keys of its signers, so it needs no entity where the seed is: during the analysis it exists implicitly, for the owners and for an attacker. A wallet has at most one descriptor entity; it is mandatory for a wallet with several signers or a custom definition, and every descriptor entity must have at least one copy somewhere. An attacker who has a descriptor also has the public keys of all its signers, and so the default descriptors of the wallets of those signers.
 
 | Attribute | Notes |
 |---|---|
@@ -247,9 +249,7 @@ Not a Secret: its serial number is not confidential.
 | Attribute | Notes |
 |---|---|
 | `spending_policies` | list of **SpendingPolicy** (at least one) |
-| `descriptor` | ref **Descriptor**; mandatory for several signers or a custom definition |
 | `definition` | `default` (the default) or `custom`, see below |
-| `coordinator` | ref **Coordinator** (mandatory) |
 | `tripwire` | `{enabled: bool, amount_sat}` |
 
 **SpendingPolicy** (nested in Wallet): one way to spend the wallet.
@@ -268,13 +268,14 @@ Examples: `2 of [A,B,C], delay 0` is the normal multisig; `1 of [A,B,C,D], delay
 
 ### Coordinator
 
-Software that builds and watches wallets (threat category "SW Wallet / Coordinator").
+Software that builds transactions for wallets and queries the Bitcoin network about their addresses (threat category "SW Wallet / Coordinator"). To coordinate a wallet it needs the descriptor of that wallet, and a wallet can be coordinated by any number of coordinators that have it (and a connection to the network). A coordinator has the descriptors it keeps (`stores_descriptors`) and, implicitly, the default descriptor of a wallet whose seeds are on its own host device.
 
 | Attribute | Notes |
 |---|---|
 | `product` | e.g. Sparrow, Nunchuk |
 | `runs_on` | ref **ComputingDevice** the software runs on (mandatory); a SigningDevice cannot host a coordinator. Together with a seed on that device it is a hot wallet |
 | `password` | optional ref **PinPassword** protecting the application or its wallet file |
+| `stores_descriptors` | list of ref **Descriptor**: the explicit copies it has; they leak with the host unless the password protects them |
 
 ### Backup
 

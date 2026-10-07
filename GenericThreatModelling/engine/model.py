@@ -91,6 +91,10 @@ class Setup:
             d.setdefault("online", False)
         for d in data.get("computing_devices", []):
             d.setdefault("online", True)
+        by_wallet = {d["wallet"]: d["id"] for d in data.get("descriptors", [])}
+        for w in data.get("wallets", []):
+            if w["id"] in by_wallet:
+                w["descriptor"] = by_wallet[w["id"]]
         for b in data.get("backups", []):
             for item in b["items"]:
                 if "seed" in item["subject"]:
@@ -285,6 +289,22 @@ class Setup:
     def coordinators_on(self, did):
         return [c["id"] for c in self.of("Coordinator") if c.get("runs_on") == did]
 
+    def coordinators_storing(self, desc):
+        return [c["id"] for c in self.of("Coordinator") if desc in c.get("stores_descriptors", [])]
+
+    def has_descriptor(self, cid, wid):
+        """The coordinator has the wallet's descriptor: an explicit copy, or implicitly because its host holds the seeds of a default wallet."""
+        d = self.ent(wid).get("descriptor")
+        if d and d in self.ent(cid).get("stores_descriptors", []):
+            return True
+        if self.descriptor_is_custom(wid):
+            return False
+        host = self.ent(cid)["runs_on"]
+        return all(host in self.ent(sg["seed"]).get("devices", []) for _, _, sg in self.signers(wid))
+
+    def coordinators_of(self, wid):
+        return [c["id"] for c in self.of("Coordinator") if self.has_descriptor(c["id"], wid)]
+
     def secret_roots(self, sid):
         """Root locations that hold a copy (backups, and devices for seeds, descriptors)."""
         locs = {self.loc_of(b) for b, _ in self.copies(sid)}
@@ -292,6 +312,7 @@ class Setup:
             locs |= {self.loc_of(d) for d in self.ent(sid).get("devices", [])}
         if self.cls(sid) == "Descriptor":
             locs |= {self.loc_of(d) for d in self.devices_storing(sid)}
+            locs |= {self.loc_of(self.ent(c)["runs_on"]) for c in self.coordinators_storing(sid)}
         return {self.root(l) for l in locs}
 
     def secret_locations(self, sid):
@@ -336,10 +357,10 @@ class Setup:
         out = []
         for w in self.of("Wallet"):
             seeds = {sg["seed"] for _, _, sg in self.signers(w["id"])}
-            hosts = w.get("coordinator") and self.ent(w["coordinator"]).get("runs_on") == eid
+            hosts = any(self.has_descriptor(co, w["id"]) for co in self.coordinators_on(eid)) if is_a(c, "Device") else False
             if is_a(c, "Device") and (hosts or any(eid in self.ent(s).get("devices", []) for s in seeds)):
                 out.append(w["id"])
-            elif c == "Coordinator" and w.get("coordinator") == eid:
+            elif c == "Coordinator" and self.has_descriptor(eid, w["id"]):
                 out.append(w["id"])
             elif c == "Descriptor" and w.get("descriptor") == eid:
                 out.append(w["id"])
@@ -370,6 +391,14 @@ class Setup:
             if self.cls(sid) == "Descriptor":
                 for d in self.devices_storing(sid):
                     add_device(d)
+                for co in self.coordinators_storing(sid):
+                    add_coordinator(co)
+
+        def add_coordinator(cid):
+            ids.add(cid)
+            if self.ent(cid).get("password"):
+                add_secret(self.ent(cid)["password"])
+            add_device(self.ent(cid)["runs_on"])
 
         def add_device(did):
             add_entity(did)
@@ -385,12 +414,8 @@ class Setup:
                 add_secret(sg["passphrase"])
         if w.get("descriptor"):
             add_secret(w["descriptor"])
-        if w.get("coordinator"):
-            ids.add(w["coordinator"])
-            if self.ent(w["coordinator"]).get("password"):
-                add_secret(self.ent(w["coordinator"])["password"])
-            if self.ent(w["coordinator"]).get("runs_on"):
-                add_device(self.ent(w["coordinator"])["runs_on"])
+        for co in self.coordinators_of(wid):
+            add_coordinator(co)
         return frozenset(ids)
 
     # attributes and conditions

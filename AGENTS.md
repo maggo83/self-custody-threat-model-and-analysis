@@ -56,6 +56,14 @@ Modelling decisions that are easy to get wrong:
 - **Access rights:** `may_spend` on a person says who may spend which wallet and after how long, alone or with others.
   Outcomes compare this with what the setup delivers. If everybody who may spend a main wallet is gone, there is no loss outcome;
   if one is alive and cannot reach it, there is.
+- **Descriptors and coordinators:** a coordinator builds transactions and queries the network and needs the descriptor of each wallet it
+  coordinates; a wallet has any number of coordinators (no wallet-to-coordinator link). `Coordinator.stores_descriptors` lists explicit copies.
+  Only copies kept where the seed is not also available are written in the setup; the default descriptor of a wallet is implicit where its
+  seeds are (`Setup.has_descriptor`). An attacker knows a wallet's descriptor from an explicit copy, or, for a default wallet, from the public
+  keys of all its signers (a known seed, or a known descriptor that contains the signer): `predicates.descriptor_known`. Privacy is lost
+  when the descriptor is known. A disclosed host leaks the descriptors of its coordinators unless the coordinator has a password the attacker
+  does not know; a disclosed signing device leaks only without PIN or with the PIN known. `wallet.descriptor` is derived from `descriptor.wallet`.
+  Diagram: explicit descriptors are entities; implicit ones (`implicit:<wallet>`) appear only in the detail diagram of a row.
 - **Overrides:** an override sets a rating for a line, for a threat on all entities, or for all threats on one entity (line wins over
   threat over entity), or answers a question for the owners. A reason is required. Overrides live in the analysis file.
 - **Implicit measures:** a procedural mechanism can count as present because of how an entity is used (`implicit_when`), without a practice.

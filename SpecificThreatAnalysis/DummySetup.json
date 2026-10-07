@@ -41,14 +41,17 @@
     { "id": "pin-safetynet", "name": "SafetyNet device PIN" }
   ],
   "descriptors": [
-    { "id": "desc-multisig", "name": "Multisig descriptor", "wallet": "wallet-multisig" }
+    { "id": "desc-multisig", "name": "Multisig descriptor", "wallet": "wallet-multisig" },
+    { "id": "desc-main1", "name": "Main1 tripwire descriptor", "wallet": "wallet-main1" },
+    { "id": "desc-recoverself", "name": "RecoverSelf tripwire descriptor", "wallet": "wallet-tripwire-recoverself" },
+    { "id": "desc-safetynet", "name": "SafetyNet tripwire descriptor", "wallet": "wallet-tripwire-safetynet" }
   ],
   "computing_devices": [{ "id": "laptop-husband", "name": "Husband's laptop", "kind": "laptop", "use": "regular", "stored_in": { "location": "loc-home-desk" }, "comment": "Assumed: stands on the desk." }],
-  "coordinators": [{ "id": "coord-sparrow", "name": "Sparrow", "product": "Sparrow", "runs_on": "laptop-husband", "comment": "Assumed: one watch-only coordinator for all wallets." }],
+  "coordinators": [{ "id": "coord-sparrow", "name": "Sparrow", "product": "Sparrow", "runs_on": "laptop-husband", "comment": "Assumed: one watch-only coordinator for all wallets.",
+    "stores_descriptors": ["desc-multisig", "desc-main1", "desc-recoverself", "desc-safetynet"] }],
   "wallets": [
     {
       "id": "wallet-main1",
-      "coordinator": "coord-sparrow",
       "name": "Main1 tripwire (single-sig)",
       "comment": "Plain single-sig with the Main1 key and only a small amount: used for on/off-ramp interaction, satoshi tests and message signing with exchanges, and as a tripwire.",
       "spending_policies": [{ "signers": [{ "seed": "seed-main1" }], "threshold": 1 }],
@@ -56,7 +59,6 @@
     },
     {
       "id": "wallet-multisig",
-      "coordinator": "coord-sparrow",
       "name": "Multisig",
       "comment": "Husband and wife sign together at once. After a delay a recovery seed joins; after the maximum delay SafetyNet alone can spend. The intermediate delay is assumed (about six months).",
       "spending_policies": [
@@ -64,19 +66,16 @@
         { "signers": [{ "seed": "seed-main1" }, { "seed": "seed-main2" }, { "seed": "seed-recoverself" }], "threshold": 2, "delay_blocks": 26280 },
         { "signers": [{ "seed": "seed-safetynet" }], "threshold": 1, "delay_blocks": 65535 }
       ],
-      "descriptor": "desc-multisig",
       "definition": "custom"
     },
     {
       "id": "wallet-tripwire-recoverself",
-      "coordinator": "coord-sparrow",
       "name": "RecoverSelf tripwire",
       "spending_policies": [{ "signers": [{ "seed": "seed-recoverself" }], "threshold": 1 }],
       "tripwire": { "enabled": true }
     },
     {
       "id": "wallet-tripwire-safetynet",
-      "coordinator": "coord-sparrow",
       "name": "SafetyNet tripwire",
       "spending_policies": [{ "signers": [{ "seed": "seed-safetynet" }], "threshold": 1 }],
       "tripwire": { "enabled": true }

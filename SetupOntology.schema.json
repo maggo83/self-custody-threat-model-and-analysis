@@ -260,15 +260,13 @@
     "wallet": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "spending_policies", "coordinator"],
+      "required": ["id", "name", "spending_policies"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string" },
         "comment": { "$ref": "#/$defs/comment" },
         "spending_policies": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/spendingPolicy" } },
-        "descriptor": { "description": "Mandatory for a wallet with several signers or a custom definition; at most one. Checked outside of this schema, together with the requirement that a copy exists.", "$ref": "#/$defs/id", "x-ref": "Descriptor" },
         "definition": { "enum": ["default", "custom"], "default": "default", "description": "default = native SegWit with the standard derivation: BIP84 (single-sig) or P2WSH with sorted keys and BIP48 script type 2' (multisig); fully determined by the keys of all signers. custom = anything else; it is not determined by the keys." },
-        "coordinator": { "$ref": "#/$defs/id", "x-ref": "Coordinator" },
         "tripwire": {
           "type": "object",
           "additionalProperties": false,
@@ -291,7 +289,8 @@
         "comment": { "$ref": "#/$defs/comment" },
         "product": { "type": "string" },
         "runs_on": { "description": "Computing device the coordinator software runs on. A signing device cannot host it. With a seed on the same device this is a hot wallet.", "$ref": "#/$defs/id", "x-ref": "ComputingDevice" },
-        "password": { "description": "PinPassword that protects the application or its wallet file.", "$ref": "#/$defs/id", "x-ref": "PinPassword" }
+        "password": { "description": "PinPassword that protects the application or its wallet file.", "$ref": "#/$defs/id", "x-ref": "PinPassword" },
+        "stores_descriptors": { "description": "Descriptors this coordinator has: it needs the descriptor of a wallet to coordinate it, and a wallet can have several coordinators. Only copies that are kept where the seed is not also available are listed; a coordinator on a device that holds the seed of a default wallet has that descriptor anyway.", "$ref": "#/$defs/idList", "x-ref": "Descriptor" }
       }
     },
 

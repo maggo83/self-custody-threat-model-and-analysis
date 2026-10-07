@@ -60,18 +60,21 @@
   ],
   "descriptors": [
     { "id": "desc-w2", "name": "w-multi descriptor", "wallet": "w-multi" },
-    { "id": "desc-w3", "name": "w-spread descriptor", "wallet": "w-spread" }
+    { "id": "desc-w3", "name": "w-spread descriptor", "wallet": "w-spread" },
+    { "id": "desc-w-single", "name": "w-single descriptor", "wallet": "w-single" },
+    { "id": "desc-w-trip", "name": "w-trip descriptor", "wallet": "w-trip" },
+    { "id": "desc-w-pin", "name": "w-pin descriptor", "wallet": "w-pin" }
   ],
   "computing_devices": [
     { "id": "pc1", "name": "Desktop computer", "kind": "desktop", "stored_in": { "location": "loc-home" } },
     { "id": "laptop2", "name": "Alice's laptop", "kind": "laptop", "stored_in": { "person": "alice" } }
   ],
   "coordinators": [
-    { "id": "coord1", "name": "Coordinator", "product": "Sparrow", "password": "pin-coord", "runs_on": "pc1" },
-    { "id": "coord2", "name": "Second coordinator", "product": "Sparrow", "runs_on": "laptop2" }
+    { "id": "coord1", "name": "Coordinator", "product": "Sparrow", "password": "pin-coord", "runs_on": "pc1", "stores_descriptors": ["desc-w2"] },
+    { "id": "coord2", "name": "Second coordinator", "product": "Sparrow", "runs_on": "laptop2", "stores_descriptors": ["desc-w3", "desc-w-single", "desc-w-trip", "desc-w-pin"] }
   ],
   "wallets": [
-    { "id": "w-single", "name": "Single-sig", "coordinator": "coord2", "spending_policies": [{ "signers": [{ "seed": "s1" }], "threshold": 1 }] },
+    { "id": "w-single", "name": "Single-sig", "spending_policies": [{ "signers": [{ "seed": "s1" }], "threshold": 1 }] },
     {
       "id": "w-multi",
       "name": "2 of 3 with fallback",
@@ -79,13 +82,11 @@
         { "signers": [{ "seed": "s2a", "passphrase": "pp2a" }, { "seed": "s2b" }, { "seed": "s2c" }], "threshold": 2 },
         { "signers": [{ "seed": "s2f" }], "threshold": 1, "delay_blocks": 52000 }
       ],
-      "descriptor": "desc-w2",
-      "definition": "custom",
-      "coordinator": "coord1"
+      "definition": "custom"
     },
-    { "id": "w-spread", "name": "2 of 4, one signer per person", "coordinator": "coord2", "spending_policies": [{ "signers": [{ "seed": "s3a" }, { "seed": "s3b" }, { "seed": "s3c" }, { "seed": "s3d" }], "threshold": 2 }], "descriptor": "desc-w3" },
-    { "id": "w-trip", "name": "Tripwire", "coordinator": "coord2", "spending_policies": [{ "signers": [{ "seed": "s4" }], "threshold": 1 }], "tripwire": { "enabled": true } },
-    { "id": "w-pin", "name": "Single-sig behind a PIN", "coordinator": "coord2", "spending_policies": [{ "signers": [{ "seed": "s5" }], "threshold": 1 }] }
+    { "id": "w-spread", "name": "2 of 4, one signer per person", "spending_policies": [{ "signers": [{ "seed": "s3a" }, { "seed": "s3b" }, { "seed": "s3c" }, { "seed": "s3d" }], "threshold": 2 }] },
+    { "id": "w-trip", "name": "Tripwire", "spending_policies": [{ "signers": [{ "seed": "s4" }], "threshold": 1 }], "tripwire": { "enabled": true } },
+    { "id": "w-pin", "name": "Single-sig behind a PIN", "spending_policies": [{ "signers": [{ "seed": "s5" }], "threshold": 1 }] }
   ],
   "backups": [
     { "id": "b1", "name": "s1 paper", "medium": "paper", "stored_in": { "location": "loc-home" }, "items": [{ "subject": { "seed": "s1" }, "format": "words" }] },

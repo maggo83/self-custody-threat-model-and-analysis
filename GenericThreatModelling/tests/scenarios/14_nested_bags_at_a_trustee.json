@@ -46,15 +46,8 @@
     { "id": "b-plan", "name": "Plan, printout", "medium": "paper", "stored_in": { "bag": "bag-outer" }, "items": [{ "subject": { "plan": true }, "format": "printed" }] }
   ],
   "computing_devices": [{ "id": "laptop", "name": "Laptop", "kind": "laptop", "use": "regular", "stored_in": { "location": "loc-home" } }],
-  "coordinators": [{ "id": "coord", "name": "Coordinator", "product": "Sparrow", "runs_on": "laptop" }],
-  "wallets": [{
-    "id": "w1", "name": "Multisig with recovery", "coordinator": "coord",
-    "descriptor": "desc1",
-    "spending_policies": [
-      { "signers": [{ "seed": "s1" }, { "seed": "s2" }], "threshold": 2 },
-      { "signers": [{ "seed": "s3" }], "threshold": 1, "delay_blocks": 52560 }
-    ]
-  }],
+  "coordinators": [{ "id": "coord", "name": "Coordinator", "product": "Sparrow", "runs_on": "laptop", "stores_descriptors": ["desc1"] }],
+  "wallets": [{ "id": "w1", "name": "Multisig with recovery", "spending_policies": [{ "signers": [{ "seed": "s1" }, { "seed": "s2" }], "threshold": 2 }, { "signers": [{ "seed": "s3" }], "threshold": 1, "delay_blocks": 52560 }] }],
   "practices": [
     { "id": "p-refresh", "mechanism": "M-P-REFRESH-TIMELOCK", "scope": ["w1"], "comment": "Assumed." },
     { "id": "p-bag-seal", "mechanism": "M-D-BAG-SEAL-CHECK", "comment": "Assumed: the strips at home are compared with the bags at Dave's from time to time." }

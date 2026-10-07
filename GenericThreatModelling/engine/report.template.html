@@ -533,8 +533,8 @@ const EDGE = {
   access: { c: '#795548', d: '2 4', t: 'person can enter' }, signer: { c: '#37474f', d: '', t: 'policy uses seed' },
   passphrase: { c: '#ef6c00', d: '6 3', t: 'passphrase of the signer' }, loaded: { c: '#2e7d32', d: '', t: 'seed loaded on device' },
   content: { c: '#2e7d32', d: '6 3', t: 'backup holds' }, encrypted: { c: '#c62828', d: '6 3', t: 'encrypted with' },
-  stores: { c: '#7b1fa2', d: '', t: 'device stores descriptor' }, pin: { c: '#9e9e9e', d: '2 4', t: 'PIN or password of' },
-  descriptor: { c: '#1565c0', d: '', t: 'wallet descriptor' }, coordinator: { c: '#9e9e9e', d: '', t: 'managed with' },
+  stores: { c: '#7b1fa2', d: '', t: 'device or coordinator has the descriptor' }, pin: { c: '#9e9e9e', d: '2 4', t: 'PIN or password of' },
+  descriptor: { c: '#1565c0', d: '', t: 'wallet descriptor' },
   plan: { c: '#b0bec5', d: '', t: 'plan contains wallet' }, strip: { c: '#9e9e9e', d: '4 3', t: 'bag strip' },
 };
 const GLYPH = {
@@ -556,7 +556,8 @@ const GLYPH = {
 const glyph = (c, x, y) => `<g transform="translate(${x} ${y})" fill="none" stroke="#455a64" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round">${GLYPH[c] || ''}</g>`;
 const fit = (s, px, size) => { const n = Math.max(3, Math.floor(px / (size * .54))); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
-function buildLayout() {
+function buildLayout(withImplicit) {
+  const live = n => withImplicit || !n.implicit;
   const pos = {}, containers = [], cards = [], heads = [], kids = {};
   const PAD = 10, HEAD = 32, CH = 52, GAP = 8, TOP = 62, LW = 156, CW = 148;
   const ALL_LANES = ['Devices and software', 'Seed backups', 'Descriptor backups', 'Passphrase/PIN backups', 'Plan copies', 'Strips, mixed'];
@@ -593,11 +594,20 @@ function buildLayout() {
   function placeItems(items, cy, lx, slotOf, n) {
     const ys = Array.from({ length: n }, () => cy);
     items.forEach(it => {
-      const l = slotOf[rawLane(it)], apps = hosted[it.id] || [], seeds = it.holds || [];
-      const h = apps.length || seeds.length ? 44 + apps.length * 32 + seeds.length * 26 + 4 : CH;
-      pos[it.id] = { x: lx(l), y: ys[l], w: CW, h, tall: h > CH, seeds: seeds.map((s, j) => ({ ...s, x: lx(l) + 8, y: ys[l] + 44 + apps.length * 32 + j * 26, w: CW - 16, h: 22 })) };
+      const l = slotOf[rawLane(it)], apps = hosted[it.id] || [], held = (it.holds || []).filter(live);
+      const boxes = (x, y, w, list) => list.map((k, j) => ({ ...k, x, y: y + j * 26, w, h: 22 }));
+      const appHolds = a => (a.holds || []).filter(live);
+      const appH = a => appHolds(a).length ? 44 + appHolds(a).length * 26 + 4 : 28;
+      const appsH = apps.reduce((t, a) => t + appH(a) + 4, 0);
+      const h = apps.length || held.length ? 44 + appsH + held.length * 26 + 4 : CH;
+      pos[it.id] = { x: lx(l), y: ys[l], w: CW, h, tall: h > CH, seeds: boxes(lx(l) + 8, ys[l] + 44 + appsH, CW - 16, held) };
       cards.push(it.id);
-      apps.forEach((c, j) => { pos[c.id] = { x: lx(l) + 8, y: ys[l] + 44 + j * 32, w: CW - 16, h: 28 }; cards.push(c.id); });
+      let ay = ys[l] + 44;
+      apps.forEach(c => {
+        pos[c.id] = { x: lx(l) + 8, y: ay, w: CW - 16, h: appH(c), tall: appHolds(c).length > 0, seeds: boxes(lx(l) + 16, ay + 44, CW - 32, appHolds(c)) };
+        cards.push(c.id);
+        ay += appH(c) + 4;
+      });
       ys[l] += h + GAP;
     });
     return Math.max(cy, ...ys);
@@ -634,7 +644,7 @@ function buildLayout() {
   const column = (x, w, classes, sub) => {
     let cy = TOP;
     for (const c of classes) {
-      const ns = ST.nodes.filter(n => n.c === c);
+      const ns = ST.nodes.filter(n => n.c === c && live(n));
       if (!ns.length) continue;
       if (sub) { heads.push({ x, y: cy + 10, t: CLASSES[c][1], small: true }); cy += 18; }
       for (const n of ns) {
@@ -655,28 +665,29 @@ function buildLayout() {
   const H = Math.max(hL, hM, hS, hW, hC) + 20;
   return { pos, containers, cards, heads, W: xC + wC + 60, H, lanes: { xs: (SUBLANES.length ? SUBLANES.map((_, i) => laneX(i) - 4).concat(laneX(SUBLANES.length) - 4) : []).concat(usedP.length ? usedP.map((_, i) => pLaneX(i) - 4).concat(pLaneX(usedP.length) - 4) : []), y1: TOP - 10, y2: H - 10 } };
 }
-const LAYOUT = buildLayout();
+const LAYOUT = buildLayout(false);
 const BACKUP_FILL = { seed: '#8bc34a', descriptor: '#f06292', secret: '#ffa726', plan: '#90a4ae' };
 const backupKind = n => { const first = ['seed', 'descriptor', 'pin', 'passphrase', 'plan'].find(k => (n.subjects || []).includes(k)); return first === 'pin' || first === 'passphrase' ? 'secret' : first || null; };
 const typeFill = id => { const n = NODE[id]; return n.c === 'Backup' ? BACKUP_FILL[backupKind(n)] || TYPE_FILL.Backup : TYPE_FILL[n.c]; };
 const fillOf = (id, byType) => byType ? typeFill(id) : maxRisk[id] !== undefined ? COLOR[maxRisk[id]] : NEUTRAL[NODE[id].c];
 
 function diagramSvg(opt = {}) {
-  const P = LAYOUT.pos, cls = opt.cls, focus = opt.focus, sel = opt.sel, pols = opt.policies || new Set();
+  const LY = opt.layout || LAYOUT;
+  const P = LY.pos, cls = opt.cls, focus = opt.focus, sel = opt.sel, pols = opt.policies || new Set();
   const fill = id => fillOf(id, opt.byType);
   const ok = id => cls ? !!(cls[id] || pols.has(id)) : focus ? focus.has(id) : true;
   const stateOf = id => (cls || focus) ? (cls ? (cls[id] ? 'hl-' + cls[id] : 'dim') : (focus.has(id) ? '' : 'dim')) : '';
   const z = opt.zoom || 1;
   const front = [];
-  const o = [`<svg class="dgm" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${LAYOUT.W} ${LAYOUT.H}" data-w="${LAYOUT.W}" data-h="${LAYOUT.H}" width="${LAYOUT.W * z}" height="${LAYOUT.H * z}">`];
-  for (const h of LAYOUT.heads) o.push(`<text x="${h.x}" y="${h.y}" font-size="${h.small ? 11 : 14}" font-weight="700" fill="${h.small ? '#78909c' : '#37474f'}">${esc(h.small && h.w ? fit(h.t, h.w, 11) : h.t)}</text>`);
-  for (const id of LAYOUT.containers) {
+  const o = [`<svg class="dgm" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${LY.W} ${LY.H}" data-w="${LY.W}" data-h="${LY.H}" width="${LY.W * z}" height="${LY.H * z}">`];
+  for (const h of LY.heads) o.push(`<text x="${h.x}" y="${h.y}" font-size="${h.small ? 11 : 14}" font-weight="700" fill="${h.small ? '#78909c' : '#37474f'}">${esc(h.small && h.w ? fit(h.t, h.w, 11) : h.t)}</text>`);
+  for (const id of LY.containers) {
     const n = NODE[id], p = P[id], bag = n.c === 'TamperEvidentBag', big = !bag;
     const fs = big ? 16 : 12;
     o.push(`<g class="node ${bag ? 'bag' : ''} ${stateOf(id)} ${sel === id ? 'sel' : ''}" data-id="${esc(id)}"><rect class="body" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="9" fill="${fill(id)}" fill-opacity="${maxRisk[id] !== undefined && !opt.byType ? .5 : 1}"/>`
       + glyph(n.c, p.x + 8, p.y + 8) + `<text x="${p.x + 30}" y="${p.y + 22}" font-size="${fs}" font-weight="700" fill="#263238">${esc(fit(n.name, p.w - 60, fs))}<tspan font-size="11" font-weight="400" fill="#607d8b" dx="8">${esc(n.sub)}</tspan></text></g>`);
   }
-  for (const x of LAYOUT.lanes.xs) o.push(`<line x1="${x}" y1="${LAYOUT.lanes.y1}" x2="${x}" y2="${LAYOUT.lanes.y2}" stroke="#90a4ae" stroke-width="1" stroke-dasharray="2 5" opacity=".6"/>`);
+  for (const x of LY.lanes.xs) o.push(`<line x1="${x}" y1="${LY.lanes.y1}" x2="${x}" y2="${LY.lanes.y2}" stroke="#90a4ae" stroke-width="1" stroke-dasharray="2 5" opacity=".6"/>`);
   if (opt.links !== false) {
     ST.edges.forEach(([a, b, kind]) => {
       const pa = P[a], pb = P[b];
@@ -694,7 +705,7 @@ function diagramSvg(opt = {}) {
       (k === 'on' ? front : o).push(`<path class="edge ${k}" d="M${x1} ${ya}C${c1} ${ya} ${c2} ${yb} ${x2} ${yb}" stroke="${e.c}"${e.d ? ` stroke-dasharray="${e.d}"` : ''}><title>${esc(e.t)}</title></path>`);
     });
   }
-  for (const id of LAYOUT.cards) {
+  for (const id of LY.cards) {
     const n = NODE[id], p = P[id];
     const person = n.c === 'Person', wallet = n.c === 'Wallet';
     const fs = person ? 14 : 12;
@@ -715,7 +726,7 @@ function diagramSvg(opt = {}) {
       s += `<text x="${p.x + 30}" y="${p.y + (two ? top : p.h / 2 + 4)}" font-size="${fs}" font-weight="${person ? 700 : 600}" fill="#263238">${esc(fit(n.name, pic - 38, fs))}</text>`;
       if (two) s += `<text x="${p.x + 30}" y="${p.y + top + 14}" font-size="10" fill="#607d8b">${esc(fit(n.sub, pic - 38, 10))}</text>`;
       if (n.img) s += `<image href="${ST.images[n.img]}" x="${p.x + p.w - 36}" y="${p.y + 3}" width="32" height="${p.tall ? 38 : p.h - 6}" preserveAspectRatio="xMidYMid meet"/>`;
-      for (const k of p.seeds || []) s += `<g${focus && !focus.has(k.id) ? ' class="dim"' : ''}><title>${k.c === 'Seed' ? 'seed' : 'descriptor'} ${esc(k.name)} ${k.c === 'Seed' ? 'is loaded on' : 'is stored on'} this device</title><rect x="${k.x}" y="${k.y}" width="${k.w}" height="${k.h}" rx="3" fill="${fill(k.id)}" stroke="#90a4ae" stroke-width=".6"/>${glyph(k.c, k.x + 4, k.y + 3)}<text x="${k.x + 24}" y="${k.y + 15}" font-size="10.5" fill="#37474f">${esc(fit(k.name, k.w - 28, 10.5))}</text></g>`;
+      for (const k of p.seeds || []) s += `<g${focus && !focus.has(k.id) ? ' class="dim"' : ''}><title>${esc(k.tip)}</title><rect x="${k.x}" y="${k.y}" width="${k.w}" height="${k.h}" rx="3" fill="${fill(k.id)}" stroke="#90a4ae" stroke-width=".6"/>${glyph(k.c, k.x + 4, k.y + 3)}<text x="${k.x + 24}" y="${k.y + 15}" font-size="10.5" fill="#37474f">${esc(fit(k.name, k.w - 28, 10.5))}</text></g>`;
     }
     o.push(s + '</g>');
   }
@@ -847,7 +858,8 @@ function openDetail(r) {
   if (!w) { alert('The browser blocked the new window.'); return; }
   const cls = {}, put = (ids, c) => ids.forEach(e => { if (!cls[e]) cls[e] = c; });
   put(r.rel.target, 't'); put(r.rel.affected, 'a'); put(r.rel.peers, 'a'); put(r.rel.wallets, 'w'); put(r.rel.mech, 'm'); put(r.rel.context, 'c');
-  const svg = diagramSvg({ cls, policies: new Set(r.rel.policies) });
+  put(r.rel.wallets.map(w => 'implicit:' + w).filter(id => NODE[id]), 'c');
+  const svg = diagramSvg({ cls, policies: new Set(r.rel.policies), layout: buildLayout(true) });
   const col = (title, name, s, body) => `<div><b>${title} ${chip(s.v)} <span class="band">${esc(DATA.scales[name].bands[s.v])}</span></b>${body}</div>`;
   const script = `${enablePan}\n${setZoom}\n${enableWheelZoom}\nconst box = document.getElementById('svgbox'); enablePan(box); enableWheelZoom(box, document.getElementById('zoom'));\nconst z = Math.min(1, (box.clientWidth - 6) / box.querySelector('svg').dataset.w);\nsetZoom(box, z); document.getElementById('zoom').value = Math.round(z * 100);`;
   w.document.write(`<!doctype html><meta charset="utf-8"><title>${esc(r.tn)}: ${esc(r.en)}</title><style>${$('style').textContent}</style>
