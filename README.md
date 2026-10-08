@@ -37,11 +37,11 @@ This writes `DummySetup.analysis.json` and `DummySetup.report.html` next to the 
 
 Five views of the same analysis:
 
-- **Classic table**: every threat on every entity with its three ratings, explanations, risk, and the reasoning chain. Ratings can be overridden in place, for a line, for a threat on all entities, or for all threats on one entity.
+- **Table (inductive)**: every threat on every entity with its three ratings, explanations, risk, and the reasoning chain. Ratings can be overridden in place, for a line, for a threat on all entities, or for all threats on one entity.
 - **Setup diagram**: people, locations, devices, seeds, backups, wallets and the plan, with focus on what a person can reach or what a wallet or spending policy depends on. It can be colored by risk or by type.
 - **Measures**: what each mechanism protects, and a what-if for adding or removing one.
 - **Access**: who is meant to be able to spend which wallet, against what the setup actually delivers.
-- **Fault trees**: per wallet, the minimal sets of parts whose loss locks the rightful people out and whose leak lets an attacker spend, with the single threats that realise each set.
+- **Fault trees (deductive)**: per wallet, the minimal sets of parts whose loss locks the rightful people out and whose leak lets an attacker spend, with the single threats that realise each set.
 
 ## How it is organised
 
