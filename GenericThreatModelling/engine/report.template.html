@@ -125,6 +125,10 @@ details.msec { margin: 14px 0; border-left: 8px solid; border-radius: 4px; paddi
 details.msec > summary { cursor: pointer; padding: 6px 0; list-style-position: inside; }
 details.msec > summary h3 { display: inline; margin: 0; font-size: 16px; }
 details.msec .cnt { color: #555; margin-left: 8px; }
+details.fsec > summary { cursor: pointer; list-style-position: inside; }
+details.fsec > summary > h2, details.fsec > summary > h3 { display: inline; }
+details.fwallet { margin: 18px 0; }
+details.fmode { margin: 10px 0 10px 18px; }
 details.have { border-color: #43a047; background: #f3faf3; }
 details.miss { border-color: #fb8c00; background: #fff7ea; }
 table.mt.have, table.mt.have td { background: #f3faf3; }
@@ -1002,9 +1006,9 @@ function faultsView() {
   const list = (sets, kind) => sets.length ? '<ol>' + sets.map(s => `<li><b>${s.parts.map(nm).map(esc).join(' + ')}</b>${s.parts.length === 1 ? ' <span class="chip r4">single point</span>' : ''}<br><small>${kind}: ${threatLinks(s.threats)}</small></li>`).join('') + '</ol>' : '<p>none</p>';
   const D = DATA.deductive || [];
   $('#view-faults').innerHTML = '<p>Read top-down: for every main wallet, the smallest sets of parts that must all fail (be destroyed, wrong or tampered with) before the people of a right have no way left to spend, and the smallest sets of parts an attacker must get hold of (disclosed, or controlled where a PIN or password guards it) to spend. Every set is derived from the same access tree the table uses; the threats named under a set bring the whole set about on their own.</p>'
-    + (D.length ? D.map(w => `<h2>${esc(entName[w.wallet] || w.wallet)}</h2>`
-      + w.loss.map(g => `<h3>Loss: ${g.people.length ? esc(g.people.map(nm).join(' and ')) + ' can no longer spend' : 'nobody can spend'} if all of these fail</h3>` + list(g.cut_sets, 'realised alone by')).join('')
-      + `<h3>Theft: an attacker spends with all of these</h3>` + list(w.theft, 'leaked alone by')).join('') : '<p>No deductive analysis in this file (run without what-if).</p>');
+    + (D.length ? D.map(w => `<details open class="fsec fwallet"><summary><h2>${esc(entName[w.wallet] || w.wallet)}</h2></summary>`
+      + w.loss.map(g => `<details open class="fsec fmode"><summary><h3>Loss: ${g.people.length ? esc(g.people.map(nm).join(' and ')) + ' can no longer spend' : 'nobody can spend'} if all of these fail</h3> <span class="cnt">${g.cut_sets.length} sets</span></summary>` + list(g.cut_sets, 'realised alone by') + '</details>').join('')
+      + `<details open class="fsec fmode"><summary><h3>Theft: an attacker spends with all of these</h3> <span class="cnt">${w.theft.length} sets</span></summary>` + list(w.theft, 'leaked alone by') + '</details></details>').join('') : '<p>No deductive analysis in this file (run without what-if).</p>');
 }
 $('#view-faults').addEventListener('click', ev => {
   const a = ev.target.closest('a[data-row]');

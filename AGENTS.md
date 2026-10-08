@@ -86,7 +86,7 @@ Modelling decisions that are easy to get wrong:
 
 ## Report page
 
-Tabs: table, diagram, measures, access, fault trees (deductive cut and path sets). Diagram: people, locations, secrets, wallets and plan in lanes. Devices and people are boxes that hold what is in them
+Tabs: table (inductive), diagram, measures, access, fault trees (deductive cut and path sets; wallets and failure modes collapse). Diagram: people, locations, secrets, wallets and plan in lanes. Devices and people are boxes that hold what is in them
 (software, seeds, descriptors, backups) in sub-lanes; lanes nobody uses are not drawn. Focus mode starts only from the focus list;
 inside it a click on a person, wallet or one of several policies moves the focus, a click on anything outside the focus ends it.
 "Color by risk" can be switched to a color per type, where backups are a darker shade of what they hold.
